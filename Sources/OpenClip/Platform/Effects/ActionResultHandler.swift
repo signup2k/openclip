@@ -34,13 +34,24 @@ public protocol KeyboardEventPosting: Sendable {
 /// `CGEvent` sequence the effect handler always emitted.
 @MainActor
 public struct SessionEventTapPoster: KeyboardEventPosting {
+    static let syntheticEventTag: Int64 = 0x4F434C4950
+
     public init() {}
 
-    public func postKey(keyCode: CGKeyCode, flags: CGEventFlags) {
+    static func makeEventSource() -> CGEventSource? {
         let src = CGEventSource(stateID: .combinedSessionState)
-        src?.setLocalEventsFilterDuringSuppressionState([.permitLocalMouseEvents, .permitSystemDefinedEvents],
-                                                       state: .eventSuppressionStateSuppressionInterval)
-        let resolvedFlags = CGEventFlags(rawValue: flags.rawValue | 0x000008)
+        // Selection capture runs while the user is typing. Never suppress hardware keys.
+        src?.userData = Self.syntheticEventTag
+        src?.localEventsSuppressionInterval = 0
+        for state: CGEventSuppressionState in [.eventSuppressionStateSuppressionInterval, .eventSuppressionStateRemoteMouseDrag] {
+            src?.setLocalEventsFilterDuringSuppressionState([.permitLocalKeyboardEvents, .permitLocalMouseEvents, .permitSystemDefinedEvents], state: state)
+        }
+        return src
+    }
+
+    public func postKey(keyCode: CGKeyCode, flags: CGEventFlags) {
+        let src = Self.makeEventSource()
+        let resolvedFlags = flags
         if let keydown = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: true),
            let keyup = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: false) {
             keydown.flags = resolvedFlags
@@ -229,7 +240,7 @@ public final class DefaultActionResultHandler: ActionResultHandler, Sendable {
 
         // Presentation/flow results are presenter-owned (PopupWindowController). The handler treats
         // them as no-ops so the switch stays exhaustive without crashing when one is routed here.
-        case .toast, .openConfiguration, .sequence, .text:
+        case .toast, .openConfiguration, .sequence, .text, .preview:
             break
 
         // Keyboard execution: keyPress posts a synthetic keystroke; runShortcut launches the

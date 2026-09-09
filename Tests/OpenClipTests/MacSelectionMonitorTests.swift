@@ -248,7 +248,7 @@ final class MacSelectionMonitorTests: XCTestCase {
 
         // Park retrieval mid-delivery until the test releases it (runs on the AX queue thread).
         let gate = DispatchSemaphore(value: 0)
-        monitor.retriever = SelectionRetrievalCoordinator(inspect: {
+        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
             gate.wait()
             return Self.fixtureTarget(role: "AXTextField", selectedText: "held text")
         }, browserRead: { _ in nil }, copyCapture: { _ in nil })
@@ -282,7 +282,7 @@ final class MacSelectionMonitorTests: XCTestCase {
         // effects). The gate parks until the test observes the fired flag, so the flag-true
         // window can't be missed by polling.
         let gate = DispatchSemaphore(value: 0)
-        monitor.retriever = SelectionRetrievalCoordinator(inspect: {
+        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
             gate.wait()
             return Self.fixtureTarget(role: "AXButton", selectedText: "irrelevant")
         }, browserRead: { _ in nil }, copyCapture: { _ in nil })
@@ -347,6 +347,107 @@ final class MacSelectionMonitorTests: XCTestCase {
             downPoint: nil, pointer: down, buttonPressed: true))
     }
 
+    func testUserCommandCAndControlCCancelPendingRetrieval() throws {
+        let monitor = MacSelectionMonitor(settingsStore: MemorySettingsStore())
+        defer { monitor.stop() }
+        for flags: CGEventFlags in [.maskCommand, .maskControl] {
+            monitor.handleSelectionTrigger(isSelectAll: false)
+            let pending = monitor.debounceTask
+            let cgEvent = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: 0x08, keyDown: true))
+            cgEvent.flags = flags
+            let event = try XCTUnwrap(NSEvent(cgEvent: cgEvent))
+            monitor.handleKeyDown(event)
+            XCTAssertTrue(pending?.isCancelled == true)
+            XCTAssertNil(monitor.debounceTask)
+        }
+    }
+
+    func testSyntheticCopyDoesNotCancelPendingRetrieval() throws {
+        let monitor = MacSelectionMonitor(settingsStore: MemorySettingsStore())
+        defer { monitor.stop() }
+        monitor.handleSelectionTrigger(isSelectAll: false)
+        let pending = monitor.debounceTask
+        let source = try XCTUnwrap(SessionEventTapPoster.makeEventSource())
+        let cgEvent = try XCTUnwrap(CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: true))
+        cgEvent.flags = .maskCommand
+        monitor.handleKeyDown(try XCTUnwrap(NSEvent(cgEvent: cgEvent)))
+        XCTAssertFalse(pending?.isCancelled == true)
+    }
+
+    func testSwitchingAppsDuringKeyboardDebounceDoesNotRetrieve() async throws {
+        let monitor = makeHoldMonitor()
+        var current: NSRunningApplication? = Self.runnerApp()
+        monitor.frontmostAppProvider = { current }
+        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
+            XCTFail("An old gesture must not read the new frontmost app")
+            return Self.fixtureTarget(role: "AXTextField", selectedText: "wrong app")
+        }, copyCapture: { _ in nil })
+        monitor.handleSelectionTrigger(isSelectAll: false)
+        current = nil
+        await monitor.debounceTask?.value
+        monitor.stop()
+    }
+
+    func testNewMouseDownCancelsPendingKeyboardRead() {
+        let monitor = MacSelectionMonitor(settingsStore: MemorySettingsStore())
+        monitor.handleSelectionTrigger(isSelectAll: false)
+        let oldTask = monitor.debounceTask
+        monitor.handleMouseDown(at: .zero)
+        XCTAssertTrue(oldTask?.isCancelled == true)
+        monitor.stop()
+    }
+
+    func testDraggingCancelsFiredHoldTask() {
+        let monitor = makeHoldMonitor()
+        monitor.handleMouseDown(at: .zero)
+        let oldTask = monitor.mouseHoldTask
+        monitor.triggeredByHold = true
+        monitor.handleMouseDragged(at: CGPoint(x: 20, y: 0))
+        XCTAssertTrue(oldTask?.isCancelled == true)
+        XCTAssertFalse(monitor.triggeredByHold)
+        monitor.stop()
+    }
+
+    func testEmptyHoldFinishingAfterReleaseRetriesMultiClickSelection() async throws {
+        let monitor = makeHoldMonitor()
+        monitor.frontmostAppProvider = { Self.runnerApp() }
+        monitor.currentCursorProvider = { .arrow }
+        monitor.currentMouseLocation = { .zero }
+        let gate = DispatchSemaphore(value: 0)
+        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
+            gate.wait()
+            return Self.fixtureTarget(role: "AXTextField", selectedText: nil)
+        }, copyCapture: { _ in nil })
+        var delivered: SelectionContext?
+        monitor.onSelection = { context, _ in delivered = context }
+        monitor.handleMouseDown(at: .zero)
+        try await waitUntil { monitor.triggeredByHold }
+        monitor.handleMouseUp(app: Self.runnerApp(), cursor: .zero, clickCount: 2)
+        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
+            Self.fixtureTarget(role: "AXTextField", selectedText: "released selection")
+        }, copyCapture: { _ in nil })
+        gate.signal()
+        try await waitUntil { delivered != nil }
+        XCTAssertEqual(delivered?.text, "released selection")
+        monitor.stop()
+    }
+
+    func testKeyboardReadIgnoresMouseCursorGate() async throws {
+        let monitor = makeHoldMonitor()
+        monitor.frontmostAppProvider = { Self.runnerApp() }
+        monitor.currentCursorProvider = { .pointingHand }
+        monitor.policyResolver = { _ in AppPolicyContext(gate: SelectionGatePolicy(allowedCursors: [.beam])) }
+        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
+            Self.fixtureTarget(role: "AXTextField", selectedText: "keyboard selection")
+        }, copyCapture: { _ in nil })
+        var delivered: SelectionContext?
+        monitor.onSelection = { context, _ in delivered = context }
+        monitor.handleSelectionTrigger(isSelectAll: false)
+        try await waitUntil { delivered != nil }
+        XCTAssertEqual(delivered?.text, "keyboard selection")
+        monitor.stop()
+    }
+
     // MARK: - Hold-to-trigger cursor & text-target gating
 
     @MainActor
@@ -359,7 +460,7 @@ final class MacSelectionMonitorTests: XCTestCase {
 
         // Retriever returns empty (no selection)
         let gate = DispatchSemaphore(value: 0)
-        monitor.retriever = SelectionRetrievalCoordinator(inspect: {
+        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
             gate.wait()
             return Self.fixtureTarget(role: "AXGroup", selectedText: nil)
         }, browserRead: { _ in nil }, copyCapture: { _ in nil })
@@ -393,7 +494,7 @@ final class MacSelectionMonitorTests: XCTestCase {
 
         // Retriever returns empty (no selection in empty text field)
         let gate = DispatchSemaphore(value: 0)
-        monitor.retriever = SelectionRetrievalCoordinator(inspect: {
+        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
             gate.wait()
             return Self.fixtureTarget(role: "AXTextField", selectedText: nil)
         }, browserRead: { _ in nil }, copyCapture: { _ in nil })
@@ -428,7 +529,7 @@ final class MacSelectionMonitorTests: XCTestCase {
 
         // Retriever returns empty
         let gate = DispatchSemaphore(value: 0)
-        monitor.retriever = SelectionRetrievalCoordinator(inspect: {
+        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
             gate.wait()
             return Self.fixtureTarget(role: "AXStaticText", selectedText: nil)
         }, browserRead: { _ in nil }, copyCapture: { _ in nil })
@@ -459,7 +560,7 @@ final class MacSelectionMonitorTests: XCTestCase {
 
         // Retriever returns active selected text
         let gate = DispatchSemaphore(value: 0)
-        monitor.retriever = SelectionRetrievalCoordinator(inspect: {
+        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
             gate.wait()
             return Self.fixtureTarget(role: "AXTextField", selectedText: "selected word")
         }, browserRead: { _ in nil }, copyCapture: { _ in nil })
@@ -484,7 +585,7 @@ final class MacSelectionMonitorTests: XCTestCase {
         monitor.currentMouseLocation = { point }
         monitor.policyResolver = { _ in AppPolicyContext(disabled: true) }
 
-        monitor.retriever = SelectionRetrievalCoordinator(inspect: {
+        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
             Self.fixtureTarget(role: "AXTextField", selectedText: "selected word")
         }, browserRead: { _ in nil }, copyCapture: { _ in nil })
 
@@ -505,7 +606,7 @@ final class MacSelectionMonitorTests: XCTestCase {
         monitor.currentMouseLocation = { point }
         monitor.policyResolver = { _ in AppPolicyContext(hotkeyOnly: true) }
 
-        monitor.retriever = SelectionRetrievalCoordinator(inspect: {
+        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
             Self.fixtureTarget(role: "AXTextField", selectedText: "selected word")
         }, browserRead: { _ in nil }, copyCapture: { _ in nil })
 

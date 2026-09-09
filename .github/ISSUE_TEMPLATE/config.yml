@@ -4,8 +4,8 @@ contact_links:
     url: https://github.com/ganeshmshetty/openclip-extensions/issues/new/choose
     about: New extension ideas or bug reports for specific extensions belong in the openclip-extensions repo.
   - name: GitHub Discussions
-    url: https://github.com/ganeshmshetty/openclip/discussions
+    url: https://github.com/signup2k/openclip/discussions
     about: Ask general questions, share workflows, or discuss ideas.
   - name: Developer and Runtime Documentation
-    url: https://github.com/ganeshmshetty/openclip/tree/main/docs
+    url: https://github.com/signup2k/openclip/tree/main/docs
     about: Extension authoring guides and architecture documentation.

@@ -6,6 +6,7 @@
 // live accessibility tree.
 import ApplicationServices
 import CoreGraphics
+import Core
 
 public struct AXElementInspector {
     /// A snapshot of the focused application and UI element plus the AX attributes needed to
@@ -150,6 +151,7 @@ public struct AXElementInspector {
 
     /// Reads a single AX attribute, returning `nil` on any error or unsupported attribute.
     private static func read(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
+        AXUIElementSetMessagingTimeout(element, Float(Constants.axReadTimeout))
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
         return value
@@ -167,6 +169,7 @@ public struct AXElementInspector {
     /// or `nil` when the element or range does not support it.
     private static func bounds(for element: AXUIElement?, range: CFTypeRef?) -> CGRect? {
         guard let element, let range else { return nil }
+        AXUIElementSetMessagingTimeout(element, Float(Constants.axReadTimeout))
         var boundsRef: CFTypeRef?
         guard AXUIElementCopyParameterizedAttributeValue(
             element, kAXBoundsForRangeParameterizedAttribute as CFString, range, &boundsRef

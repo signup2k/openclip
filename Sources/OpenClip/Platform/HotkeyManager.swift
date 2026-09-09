@@ -70,12 +70,14 @@ public final class HotkeyManager {
                 if let result = await SelectionRetrievalCoordinator().retrieve(
                     for: appIdentity,
                     policy: policy,
-                    cursor: CursorClassifier.current
+                    cursor: .unknown
                 ) {
                     retrievedText = result.text
                     selectionBounds = result.bounds
                 }
                 
+                guard NSWorkspace.shared.frontmostApplication?.processIdentifier == frontApp.processIdentifier else { return }
+
                 // No selection in the frontmost app: fall back to the clipboard so the popup has
                 // text to act on instead of reporting "no input". isClipboardFallback marks the
                 // text as not-from-a-live-selection; the registry drops Copy/Cut (they require a
@@ -110,6 +112,7 @@ public final class HotkeyManager {
                 )
                 
                 let canPaste = await probeTask?.value
+                guard NSWorkspace.shared.frontmostApplication?.processIdentifier == frontApp.processIdentifier else { return }
                 popupController?.show(for: context, pasteAvailable: canPaste, initialMode: .search)
             }
         }

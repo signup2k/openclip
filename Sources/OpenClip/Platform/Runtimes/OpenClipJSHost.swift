@@ -153,6 +153,7 @@ public final class OpenClipJSHost: @unchecked Sendable {
 
     /// One side-effecting JS call, kept in call order for `.sequence` resolution.
     enum Effect: Sendable {
+        case preview(String)
         case paste(String)
         case copy(String)
         case pasteContent(RichPasteboardPayload)
@@ -297,6 +298,9 @@ public final class OpenClipJSHost: @unchecked Sendable {
                           userInfo: [NSLocalizedDescriptionKey: "Could not build openclip bridge object"])
         }
 
+        let previewBlock: @convention(block) (String) -> Void = { value in
+            effects.value.append(.preview(value))
+        }
         let pasteBlock: @convention(block) (String) -> Void = { value in
             collected.value.paste = value
             effects.value.append(.paste(value))
@@ -366,6 +370,7 @@ public final class OpenClipJSHost: @unchecked Sendable {
             collected.value.configuration = Self.parseConfiguration(value, actionID: request.actionID)
         }
 
+        openclip.setObject(previewBlock, forKeyedSubscript: "preview" as NSString)
         openclip.setObject(pasteBlock, forKeyedSubscript: "paste" as NSString)
         openclip.setObject(copyBlock, forKeyedSubscript: "copy" as NSString)
         openclip.setObject(pasteContentBlock, forKeyedSubscript: "pasteContent" as NSString)
@@ -818,6 +823,7 @@ public final class OpenClipJSHost: @unchecked Sendable {
 
     private static func effectResult(_ effect: Effect, input: String) -> ActionResult {
         switch effect {
+        case .preview(let text): return .preview(text)
         case .paste(let text): return .paste(text)
         case .copy(let text): return .copy(text)
         case .pasteContent(let payload): return .pasteContent(payload)

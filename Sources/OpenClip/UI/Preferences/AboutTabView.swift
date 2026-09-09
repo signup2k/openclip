@@ -47,6 +47,11 @@ struct AboutTab: View {
 
             // ── Updates Card ──
             VStack(alignment: .leading, spacing: 6) {
+                if !updateManager.isUpdateChannelConfigured {
+                    Text("Personal build. Install updates manually.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
                 if let newVersion = updateManager.availableUpdateVersion {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 6) {
@@ -116,6 +121,7 @@ struct AboutTab: View {
                         .labelsHidden()
                         .controlSize(.mini)
                         .accessibilityLabel(String(localized: "Automatically Download Updates"))
+                        .disabled(!updateManager.isUpdateChannelConfigured)
                 }
                 .padding(.vertical, 2)
 
@@ -135,6 +141,7 @@ struct AboutTab: View {
                         .labelsHidden()
                         .controlSize(.mini)
                         .accessibilityLabel(String(localized: "Notify on Update"))
+                        .disabled(!updateManager.isUpdateChannelConfigured)
                 }
                 .padding(.vertical, 2)
 
@@ -177,13 +184,13 @@ struct AboutTab: View {
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
                     actionButton("Website", icon: "globe") {
-                        openURL("https://www.getopenclip.app")
+                        openURL("https://github.com/signup2k/openclip")
                     }
                     actionButton("GitHub", icon: "chevron.left.forwardslash.chevron.right") {
-                        openURL("https://github.com/ganeshmshetty/openclip")
+                        openURL("https://github.com/signup2k/openclip")
                     }
                     actionButton("Issues", icon: "ant") {
-                        openURL("https://github.com/ganeshmshetty/openclip/issues")
+                        openURL("https://github.com/signup2k/openclip/issues")
                     }
                 }
 

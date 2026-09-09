@@ -426,5 +426,6 @@
   "Pause in %@": "%@ で一時停止",
   "Paused in %@": "%@ で一時停止中",
   "Pause in App": "アプリで一時停止",
-  "Resume OpenClip (%lldm left)": "OpenClip を再開 (残り %lld 分)"
+  "Resume OpenClip (%lldm left)": "OpenClip を再開 (残り %lld 分)",
+  "Personal build. Install updates manually.": "個人用ビルドです。更新は手動でインストールしてください。"
 }

@@ -27,6 +27,8 @@ public indirect enum ActionResult: Sendable {
     /// `secondary`) are never re-decided. Does not auto-dismiss the popup; the controller decides
     /// dismissal from the resolved outcome.
     case text(String)
+    /// Explicit preview: always renders a result card, independent of text delivery preferences.
+    case preview(String)
     case showServices(String)
 
     /// Look up `word` in the system dictionaries headlessly (no app launch) and copy its definition
@@ -78,7 +80,7 @@ extension ActionResult {
         switch self {
         case .toast(let feedback):
             return !feedback.keepVisible
-        case .text:
+        case .text, .preview:
             // Implicit returned text is a presentation result: dismissal is decided by the
             // controller from the resolved outcome (preview keeps the popup open; paste/copy dismiss).
             return false
@@ -94,7 +96,7 @@ extension ActionResult {
     public var containsToast: Bool {
         switch self {
         case .toast: return true
-        case .text: return false
+        case .text, .preview: return false
         case .sequence(let items): return items.contains(where: \.containsToast)
         default: return false
         }

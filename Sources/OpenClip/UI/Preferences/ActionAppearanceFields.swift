@@ -22,6 +22,8 @@ struct ActionAppearanceFields: View {
     let baseIcon: ActionIcon?
     @Binding var displayMode: Int // 0 = Show Icon, 1 = Show Text
 
+    var textGlyphFallbackSymbol: String? = nil
+
     @State private var showingIconPicker = false
     @State private var isIconHovered = false
 
@@ -33,7 +35,8 @@ struct ActionAppearanceFields: View {
             displayTextFallback: displayTextFallback,
             iconSymbol: iconSymbol,
             initialIconSymbol: initialIconSymbol,
-            baseIcon: baseIcon
+            baseIcon: baseIcon,
+            textGlyphFallbackSymbol: textGlyphFallbackSymbol
         )
     }
 
@@ -46,13 +49,17 @@ struct ActionAppearanceFields: View {
         displayTextFallback: String,
         iconSymbol: String,
         initialIconSymbol: String,
-        baseIcon: ActionIcon?
+        baseIcon: ActionIcon?,
+        textGlyphFallbackSymbol: String? = nil
     ) -> ActionIcon {
         if displayMode == 1 {
             let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
             return .text(trimmed.isEmpty ? displayTextFallback : trimmed)
         }
         if iconSymbol.isEmpty {
+            if case .text? = baseIcon, let fallback = textGlyphFallbackSymbol {
+                return .symbol(fallback)
+            }
             return baseIcon ?? .symbol(Constants.defaultIconSymbol)
         }
         if iconSymbol == initialIconSymbol, let base = baseIcon {

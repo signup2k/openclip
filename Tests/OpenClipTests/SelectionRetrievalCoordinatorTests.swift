@@ -47,7 +47,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     // MARK: - Gate
 
     func testGateSkipsButtonRole() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: "button text", role: "AXButton") }
         )
         let policy = AppPolicyContext(retrievalMode: .axTextControl, gate: .default)
@@ -60,7 +60,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testGateAllowsButtonRoleInsideWebArea() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: {
                 AXElementInspector.Target(
                     focusedApp: nil,
@@ -88,7 +88,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testUnknownCursorProceedsEvenWhenNotAllowed() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: "proceed") }
         )
         let policy = AppPolicyContext(
@@ -104,7 +104,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testDisallowedCursorBlocksRetrieval() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: "blocked") }
         )
         let policy = AppPolicyContext(
@@ -123,7 +123,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
 
     func testAXTextControlReturnsTextFromFixtureTarget() async {
         let bounds = CGRect(x: 1, y: 2, width: 30, height: 4)
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: "hello", bounds: bounds) }
         )
         let policy = AppPolicyContext(retrievalMode: .axTextControl)
@@ -137,7 +137,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testAXWebAreaReturnsTextFromFixtureTarget() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.webAreaTarget(selectedText: "web text") }
         )
         let policy = AppPolicyContext(retrievalMode: .axWebArea)
@@ -152,7 +152,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     func testAXWebAreaSettleRetryReInspectsUntilTextSettles() async {
         final class InspectCallCount: @unchecked Sendable { var value = 0 }
         let calls = InspectCallCount()
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: {
                 calls.value += 1
                 if calls.value <= 2 {
@@ -173,7 +173,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testBrowserModeUsesWebAreaSelection() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.webAreaTarget(selectedText: "web selection") }
         )
         let policy = AppPolicyContext(retrievalMode: .axWebArea)
@@ -186,7 +186,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testBrowserModeNilFallsBackToKeyboardCopy() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil) },
             copyCapture: { _ in TextResult(text: "copy fallback") }
         )
@@ -202,7 +202,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     // MARK: - Copy modes
 
     func testMenuCopyProceedsWithoutConfirmedSelection() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil) },
             copyCapture: { _ in TextResult(text: "captured via menu copy") }
         )
@@ -218,7 +218,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     func testMenuCopyStartsAtMenuCopyEvenWhenAXTextAvailable() async {
         // A menu-copy rule starts the chain at menu copy, so it never performs the AX text strategy
         // above it — even when the target happens to expose AX text.
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: "ax text") },
             copyCapture: { _ in TextResult(text: "captured via menu copy") }
         )
@@ -232,7 +232,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testKeyboardCopyStartsAtKeyboardCopyEvenWhenAXTextAvailable() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: "ax text") },
             copyCapture: { _ in TextResult(text: "captured keyboard copy") }
         )
@@ -250,7 +250,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
         // fall through to menu copy.
         final class Counter: @unchecked Sendable { var calls = 0 }
         let counter = Counter()
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil) },
             copyCapture: { _ in
                 counter.calls += 1
@@ -271,7 +271,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
         // menu-copy is strict for terminals and does not fall through to keyboard-copy, avoiding double timeouts.
         final class Counter: @unchecked Sendable { var calls = 0 }
         let counter = Counter()
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil) },
             copyCapture: { _ in
                 counter.calls += 1
@@ -289,7 +289,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testCopyCaptureNilReturnsNil() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil) },
             copyCapture: { _ in nil }
         )
@@ -303,7 +303,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testMenuCopyCaptureNilReturnsNil() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil) },
             copyCapture: { _ in nil }
         )
@@ -319,7 +319,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     // MARK: - Select-all (⌘A) gating for copy modes
 
     func testSelectAllMenuCopySkippedOnNonTextElement() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil, role: "AXOutline") },
             copyCapture: { _ in TextResult(text: "should not copy rows") }
         )
@@ -334,7 +334,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testSelectAllMenuCopySkippedOnNonTextElementWithoutSelection() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: "row text", role: "AXTable") },
             copyCapture: { _ in TextResult(text: "should not copy") }
         )
@@ -349,7 +349,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testSelectAllMenuCopyProceedsOnTextElement() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil, role: "AXTextArea") },
             copyCapture: { _ in TextResult(text: "captured select-all text") }
         )
@@ -364,7 +364,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testSelectAllDoesNotGateNonCopyModes() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: "selected text") }
         )
         let policy = AppPolicyContext(retrievalMode: .axTextControl)
@@ -380,7 +380,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     // MARK: - Fallback cascade
 
     func testAXTextControlFallsBackToCopyWhenAXReadIsEmpty() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil, role: "AXTextArea") },
             copyCapture: { _ in TextResult(text: "copied fallback") }
         )
@@ -394,7 +394,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testBrowserScriptFallsBackThroughWebAreaThenCopy() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.webAreaTarget(selectedText: "") },
             browserRead: { _ in nil },
             copyCapture: { _ in TextResult(text: "browser copy fallback") }
@@ -411,7 +411,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     // MARK: - Blank-text filtering
 
     func testRetrieveRejectsWhitespaceOnlySelection() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: "   \n  ") }
         )
         let policy = AppPolicyContext(retrievalMode: .axTextControl)
@@ -424,7 +424,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testRetrieveRejectsWhitespaceOnlyCopyCapture() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil, role: "AXTextArea") },
             copyCapture: { _ in TextResult(text: "  ") }
         )
@@ -438,7 +438,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testBlankAXTextFallsThroughToCopyFallback() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: "   \t  ") },
             copyCapture: { _ in TextResult(text: "copied text") }
         )
@@ -454,7 +454,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     func testStrictlyNativeAppDoesNotFallbackToKeyboardCopy() async throws {
         final class Counter: @unchecked Sendable { var calls = 0 }
         let counter = Counter()
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil) },
             copyCapture: { _ in
                 counter.calls += 1
@@ -473,7 +473,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testNotesResolvesKeyboardCopyFallback() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil) },
             copyCapture: { _ in TextResult(text: "copied from notes") }
         )
@@ -487,7 +487,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testNativeAppWithEmbeddedWebAreaCascadesToWebArea() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.webAreaTarget(selectedText: "mail web body") }
         )
         let policy = AppPolicyContext(retrievalMode: .axTextControl)
@@ -500,7 +500,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testPreviewAppFallsBackToKeyboardCopy() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil) },
             copyCapture: { _ in TextResult(text: "copied from preview pdf") }
         )
@@ -516,7 +516,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     func testBrowserCascadeOmitsBrowserScript() async {
         final class Counter: @unchecked Sendable { var calls = 0 }
         let counter = Counter()
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil) },
             browserRead: { _ in
                 counter.calls += 1
@@ -537,8 +537,8 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     // MARK: - Rich-content enrichment
 
     func testTextOnlyWebAreaWinEnrichesFromPasteboardCapture() async {
-        let coordinator = SelectionRetrievalCoordinator(
-            inspect: { Self.webAreaTarget(selectedText: "plain selection") },
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
+            inspect: { Self.webAreaTarget(selectedText: "rich selection") },
             browserRead: { _ in nil },
             copyCapture: { _ in TextResult(text: "rich selection", html: "<b>rich</b> selection") }
         )
@@ -552,10 +552,63 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
         XCTAssertEqual(result?.html, "<b>rich</b> selection")
     }
 
+    func testEnrichmentDoesNotReplaceSelectionWithDifferentClipboardText() async {
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
+            inspect: { Self.webAreaTarget(selectedText: "selected text") },
+            copyCapture: { _ in TextResult(text: "new user copy", html: "<b>new user copy</b>") }
+        )
+        let result = await coordinator.retrieve(for: AppIdentity(bundleIdentifier: "com.google.Chrome"),
+                                                policy: AppPolicyContext(retrievalMode: .axWebArea), cursor: .unknown)
+        XCTAssertEqual(result?.text, "selected text")
+        XCTAssertNil(result?.html)
+    }
+
+    func testCancelledInspectNeverFallsThroughToCopy() async {
+        let started = expectation(description: "inspect started")
+        let gate = DispatchSemaphore(value: 0)
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
+            started.fulfill()
+            gate.wait()
+            return Self.textFieldTarget()
+        }, copyCapture: { _ in
+            XCTFail("Cancelled retrieval must not copy")
+            return nil
+        })
+        let task = Task {
+            await coordinator.retrieve(for: AppIdentity(bundleIdentifier: "com.test.app"),
+                                       policy: AppPolicyContext(retrievalMode: .keyboardCopy), cursor: .unknown)
+        }
+        await fulfillment(of: [started], timeout: 1)
+        task.cancel()
+        gate.signal()
+        let result = await task.value
+        XCTAssertNil(result)
+    }
+
+    func testWebSettleExhaustionFallsBackToCopyOnce() async {
+        actor Counter {
+            var calls = 0
+            func increment() { calls += 1 }
+        }
+        let counter = Counter()
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
+            inspect: { Self.webAreaTarget(selectedText: "") },
+            copyCapture: { _ in
+                await counter.increment()
+                return TextResult(text: "fallback")
+            }
+        )
+        let result = await coordinator.retrieve(for: AppIdentity(bundleIdentifier: "com.google.Chrome"),
+                                                policy: AppPolicyContext(retrievalMode: .axWebArea), cursor: .unknown)
+        XCTAssertEqual(result?.text, "fallback")
+        let count = await counter.calls
+        XCTAssertEqual(count, 1)
+    }
+
     func testNativeAppTextOnlyWinDoesNotFireCopyCapture() async throws {
         final class Counter: @unchecked Sendable { var calls = 0 }
         let counter = Counter()
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: "native text") },
             copyCapture: { _ in
                 counter.calls += 1
@@ -577,7 +630,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     func testKeyboardCopySkipsEnrichmentCapture() async {
         final class Counter: @unchecked Sendable { var calls = 0 }
         let counter = Counter()
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil) },
             copyCapture: { _ in
                 counter.calls += 1
@@ -596,7 +649,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
     }
 
     func testEnrichmentKeepsOriginalWhenCaptureYieldsNoRichContent() async {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.webAreaTarget(selectedText: "plain selection") },
             browserRead: { _ in nil },
             copyCapture: { _ in TextResult(text: "plain capture") }
@@ -622,7 +675,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
         inspectStarted.assertForOverFulfill = true
         let unblock = DispatchSemaphore(value: 0)
 
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: {
                 inspectStarted.fulfill()
                 unblock.wait()
@@ -660,14 +713,14 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
         // while the AX queue thread stays blocked on the semaphore.
         let zombieUnblock = DispatchSemaphore(value: 0)
         defer { zombieUnblock.signal() }
-        let hungCoordinator = SelectionRetrievalCoordinator(
+        let hungCoordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: {
                 zombieUnblock.wait()
                 return Self.textFieldTarget(selectedText: "zombie")
             }
         )
         // A fresh coordinator shares the process-wide gate — proving the permit crossed instances.
-        let freshCoordinator = SelectionRetrievalCoordinator(
+        let freshCoordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: "fresh") }
         )
         let policy = AppPolicyContext(retrievalMode: .axTextControl)
@@ -702,7 +755,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
         inspectStarted.assertForOverFulfill = true
         let unblock = DispatchSemaphore(value: 0)
 
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: {
                 inspectStarted.fulfill()
                 unblock.wait()
@@ -748,7 +801,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
         let zombieUnblock = DispatchSemaphore(value: 0)
         defer { zombieUnblock.signal() }
 
-        let hungCoordinator = SelectionRetrievalCoordinator(
+        let hungCoordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil) },
             copyCapture: { trigger in
                 await MainActor.run { trigger() }
@@ -759,7 +812,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
                 zombieUnblock.wait()
             }
         )
-        let freshCoordinator = SelectionRetrievalCoordinator(
+        let freshCoordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: "fresh") }
         )
         let menuPolicy = AppPolicyContext(retrievalMode: .menuCopy)
@@ -797,7 +850,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
             for _ in 0..<Constants.axMaxConcurrentInspects { zombieUnblock.signal() }
         }
 
-        let hungCoordinator = SelectionRetrievalCoordinator(
+        let hungCoordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: nil) },
             copyCapture: { trigger in
                 await MainActor.run { trigger() }
@@ -808,7 +861,7 @@ final class SelectionRetrievalCoordinatorTests: XCTestCase {
                 zombieUnblock.wait()
             }
         )
-        let freshCoordinator = SelectionRetrievalCoordinator(
+        let freshCoordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.textFieldTarget(selectedText: "fresh") }
         )
         let menuPolicy = AppPolicyContext(retrievalMode: .menuCopy)

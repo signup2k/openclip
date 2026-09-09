@@ -1,107 +1,28 @@
-name: Release
+name: Personal Release Packages
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  package-and-release:
-    name: Package App & Create Release
+  package:
     runs-on: macos-26
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Select Xcode 26
+      - uses: actions/checkout@v4
+      - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: '26.6'
-
       - name: Install XcodeGen
         run: brew install xcodegen
-
-      - name: Generate Xcode Project
-        run: xcodegen generate
-
-      - name: Download Sparkle CLI Tools
-        run: |
-          mkdir -p /tmp/sparkle scripts/bin
-          SPARKLE_SHA256="50612a06038abc931f16011d7903b8326a362c1074dabccb718404ce8e585f0b"
-          curl -fsSL "https://github.com/sparkle-project/Sparkle/releases/download/2.6.4/Sparkle-2.6.4.tar.xz" -o /tmp/Sparkle-2.6.4.tar.xz
-          echo "$SPARKLE_SHA256  /tmp/Sparkle-2.6.4.tar.xz" | shasum -a 256 -c -
-          tar xJ -f /tmp/Sparkle-2.6.4.tar.xz -C /tmp/sparkle
-          cp -R /tmp/sparkle/bin/. scripts/bin/
-
-      - name: Build & Package Release (.zip, .dmg, & appcast.xml)
-        id: build_package
-        env:
-          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          ./scripts/release_update.sh "$VERSION"
-          ZIP_FILE="build/release/OpenClip-v${VERSION}.zip"
-          SHA256=$(shasum -a 256 "$ZIP_FILE" | awk '{print $1}')
-          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
-          echo "Built OpenClip v$VERSION with SHA256: $SHA256"
-
-      - name: Extract Release Notes from CHANGELOG
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          awk -v ver="## v$VERSION" '
-            $0 ~ ver { flag=1; next }
-            flag && /^## v/ { flag=0 }
-            flag { print }
-          ' CHANGELOG.md > /tmp/release_notes.md
-          cat /tmp/release_notes.md
-
-      - name: Create GitHub Release
-        id: create_release
-        uses: softprops/action-gh-release@v2
+      - name: Build personal packages
+        run: ./scripts/release_update.sh
+      - uses: actions/upload-artifact@v4
         with:
-          body_path: /tmp/release_notes.md
-          files: |
+          name: OpenClip-personal-${{ github.sha }}
+          path: |
             build/release/*.zip
             build/release/*.dmg
-            build/release/appcast.xml
-          draft: false
-          prerelease: ${{ contains(github.ref, '-') }}
-          generate_release_notes: false
-          overwrite: true
-
-      - name: Update Homebrew Tap
-        if: "!contains(github.ref, '-')"
-        continue-on-error: true
-        env:
-          TOKEN: ${{ secrets.TAP_GITHUB_TOKEN || secrets.HOMEBREW_TAP_TOKEN || secrets.PAT }}
-          VERSION: ${{ steps.build_package.outputs.version }}
-          SHA256: ${{ steps.build_package.outputs.sha256 }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "::warning ::No TAP_GITHUB_TOKEN or HOMEBREW_TAP_TOKEN secret configured. Skipping Homebrew tap update."
-            exit 0
-          fi
-          echo "==> Updating ganeshmshetty/homebrew-tap cask..."
-          rm -rf /tmp/homebrew-tap
-          git clone "https://x-access-token:${TOKEN}@github.com/ganeshmshetty/homebrew-tap.git" /tmp/homebrew-tap
-          cd /tmp/homebrew-tap
-          sed -i '' "s/version \".*\"/version \"${VERSION}\"/" Casks/openclip.rb
-          sed -i '' "s/sha256 \".*\"/sha256 \"${SHA256}\"/" Casks/openclip.rb
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/openclip.rb
-          if git diff --staged --quiet; then
-            echo "No changes to Casks/openclip.rb"
-          else
-            git commit -m "openclip ${VERSION}"
-            git push origin master
-            echo "Successfully updated ganeshmshetty/homebrew-tap Casks/openclip.rb to v${VERSION} (${SHA256})"
-          fi
+          if-no-files-found: error

@@ -34,6 +34,7 @@ public struct AXWebAreaStrategy {
     /// Re-queries `element` directly for fresh selection text and bounds, avoiding
     /// full system-wide ancestor tree re-inspections during settle-retry polling.
     public static func pollFresh(from element: AXUIElement) -> TextResult? {
+        AXUIElementSetMessagingTimeout(element, Float(Constants.axReadTimeout))
         var markerValue: CFTypeRef?
         if AXUIElementCopyAttributeValue(element, selectedTextMarkerRangeAttribute as CFString, &markerValue) == .success,
            let markerRange = markerValue,
@@ -56,6 +57,7 @@ public struct AXWebAreaStrategy {
     /// Resolve a text marker range to its string via the
     /// AXStringForTextMarkerRange parameterized attribute.
     private static func string(for element: AXUIElement, markerRange: AXTextMarkerRange) -> String? {
+        AXUIElementSetMessagingTimeout(element, Float(Constants.axReadTimeout))
         var value: CFTypeRef?
         guard AXUIElementCopyParameterizedAttributeValue(
             element, stringForTextMarkerRangeAttribute as CFString, markerRange, &value
@@ -66,6 +68,7 @@ public struct AXWebAreaStrategy {
     /// The bounds for a text marker range via the
     /// AXBoundsForTextMarkerRange parameterized attribute.
     private static func bounds(for element: AXUIElement, markerRange: AXTextMarkerRange) -> CGRect? {
+        AXUIElementSetMessagingTimeout(element, Float(Constants.axReadTimeout))
         var value: CFTypeRef?
         guard AXUIElementCopyParameterizedAttributeValue(
             element, boundsForTextMarkerRangeAttribute as CFString, markerRange, &value

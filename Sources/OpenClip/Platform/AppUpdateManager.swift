@@ -14,12 +14,23 @@ import Core
 public final class AppUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegate {
     public static let shared = AppUpdateManager()
 
-    public static let defaultFeedURL = "https://github.com/ganeshmshetty/openclip/releases/latest/download/appcast.xml"
+    public static let defaultFeedURL = "https://github.com/signup2k/openclip/releases/latest/download/appcast.xml"
     public static let updateNotificationCategory = "OPENCLIP_UPDATE_CATEGORY"
 
     /// Sparkle's standard controller; `startingUpdater: true` enables the background schedule
     /// configured via `SUScheduledCheckInterval` in Info.plist.
-    private var controller: SPUStandardUpdaterController!
+    private var controller: SPUStandardUpdaterController?
+
+    /// An explicit personal feed and signing key are required; inherited preferences cannot
+    /// start Sparkle in an unsigned personal build.
+    public let isUpdateChannelConfigured: Bool
+
+    static func acceptsUpdateConfiguration(feedURL: String?, publicKey: String?) -> Bool {
+        guard feedURL == defaultFeedURL,
+              let publicKey, let keyData = Data(base64Encoded: publicKey),
+              keyData.count == 32 else { return false }
+        return true
+    }
 
     /// Set when a newer version has been detected, nil when up to date.
     @Published public private(set) var availableUpdateVersion: String?
@@ -64,8 +75,13 @@ public final class AppUpdateManager: NSObject, ObservableObject, SPUUpdaterDeleg
     private var lastNotifiedVersion: String?
 
     private override init() {
-        let autoCheck = DefaultSettingsStore.shared.get(.automaticallyChecksForUpdates)
-        let autoDownload = DefaultSettingsStore.shared.get(.automaticallyDownloadsUpdates)
+        let configured = Self.acceptsUpdateConfiguration(
+            feedURL: Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
+            publicKey: Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String
+        )
+        self.isUpdateChannelConfigured = configured
+        let autoCheck = configured && DefaultSettingsStore.shared.get(.automaticallyChecksForUpdates)
+        let autoDownload = configured && DefaultSettingsStore.shared.get(.automaticallyDownloadsUpdates)
         let notify = DefaultSettingsStore.shared.get(.notifyOnUpdate)
 
         self.automaticallyChecksForUpdates = autoCheck
@@ -74,11 +90,13 @@ public final class AppUpdateManager: NSObject, ObservableObject, SPUUpdaterDeleg
 
         super.init()
 
-        controller = SPUStandardUpdaterController(
+        guard configured else { return }
+        let controller = SPUStandardUpdaterController(
             startingUpdater: autoCheck,
             updaterDelegate: self,
             userDriverDelegate: nil
         )
+        self.controller = controller
         controller.updater.automaticallyChecksForUpdates = autoCheck
         controller.updater.automaticallyDownloadsUpdates = autoDownload
 
@@ -96,7 +114,7 @@ public final class AppUpdateManager: NSObject, ObservableObject, SPUUpdaterDeleg
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
                 guard let self, self.automaticallyChecksForUpdates else { return }
-                self.controller.updater.checkForUpdatesInBackground()
+                self.controller?.updater.checkForUpdatesInBackground()
             }
         }
     }
@@ -104,12 +122,12 @@ public final class AppUpdateManager: NSObject, ObservableObject, SPUUpdaterDeleg
     // MARK: - SPUUpdaterDelegate
 
     public func feedURLString(for updater: SPUUpdater) -> String? {
-        Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String ?? Self.defaultFeedURL
+        isUpdateChannelConfigured ? Self.defaultFeedURL : nil
     }
 
     /// Triggers an interactive update check (shows the Sparkle UI).
     public func checkForUpdates() {
-        controller.checkForUpdates(nil)
+        controller?.checkForUpdates(nil)
     }
 
     /// Installs the update immediately and relaunches the app.
@@ -117,7 +135,7 @@ public final class AppUpdateManager: NSObject, ObservableObject, SPUUpdaterDeleg
         if let block = immediateInstallationBlock {
             block()
         } else {
-            controller.checkForUpdates(nil)
+            controller?.checkForUpdates(nil)
         }
     }
 
@@ -129,7 +147,7 @@ public final class AppUpdateManager: NSObject, ObservableObject, SPUUpdaterDeleg
 
     /// Returns the date of the last successful update check, if any.
     public var lastUpdateCheckDate: Date? {
-        controller.updater.lastUpdateCheckDate
+        controller?.updater.lastUpdateCheckDate
     }
 
     public func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {

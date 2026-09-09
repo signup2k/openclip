@@ -5,6 +5,7 @@
 // app's retrieval mode, and delegates to the matching strategy. The blocking AX snapshot
 // (AXElementInspector.inspect) runs off the cooperative pool on a dedicated queue, raced against
 // Constants.axReadTimeout so a slow or unresponsive target app can never hang the popup.
+import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
@@ -38,6 +39,7 @@ public struct SelectionRetrievalCoordinator: Sendable {
     }
     private static let inspectGate = InspectConcurrencyGate()
 
+    private let inputRevision: @Sendable () -> [UInt32]
     private let inspect: TargetProvider
     private let browserRead: BrowserReader
     private let copyCapture: CopyCapture
@@ -47,6 +49,7 @@ public struct SelectionRetrievalCoordinator: Sendable {
     /// and mode routing with fixture targets instead of the live accessibility tree (production
     /// defaults run live AX).
     public init(
+        inputRevision: @escaping @Sendable () -> [UInt32] = PasteboardCopyEngine.hardwareInputRevision,
         inspect: @escaping TargetProvider = { AXElementInspector.inspect() },
         browserRead: @escaping BrowserReader = { bundleIdentifier in
             await BrowserScriptStrategy.read(bundleIdentifier: bundleIdentifier)
@@ -54,6 +57,7 @@ public struct SelectionRetrievalCoordinator: Sendable {
         copyCapture: @escaping CopyCapture = Self.defaultCopyCapture,
         menuPress: @escaping MenuPress = Self.pressEditCopyMenu
     ) {
+        self.inputRevision = inputRevision
         self.inspect = inspect
         self.browserRead = browserRead
         self.copyCapture = copyCapture
@@ -79,7 +83,10 @@ public struct SelectionRetrievalCoordinator: Sendable {
         cursor: CursorClass,
         isSelectAll: Bool = false
     ) async -> TextResult? {
+        guard !Task.isCancelled else { return nil }
+        let input = inputRevision()
         let target = await inspectWithWatchdog()
+        guard !Task.isCancelled else { return nil }
         guard let target else {
             Log.selection.debug("coordinator: AX inspect timed out for \(app.bundleIdentifier ?? "unknown", privacy: .public); no selection")
             return nil
@@ -114,7 +121,7 @@ public struct SelectionRetrievalCoordinator: Sendable {
 
         Log.selection.debug("coordinator: gate passed for \(app.bundleIdentifier ?? "unknown", privacy: .public); retrieving via \(policy.retrievalMode.rawValue, privacy: .public)")
 
-        return Self.nonBlank(await read(for: app, target: target, policy: policy))
+        return Self.nonBlank(await read(for: app, target: target, policy: policy, input: input))
     }
 
     /// Resolves an ordered cascade of strategies from the inspected target and the app, then returns
@@ -124,12 +131,14 @@ public struct SelectionRetrievalCoordinator: Sendable {
     private func read(
         for app: AppIdentity,
         target: AXElementInspector.Target,
-        policy: AppPolicyContext
+        policy: AppPolicyContext,
+        input: [UInt32]
     ) async -> TextResult? {
         let bundleID = app.bundleIdentifier ?? "unknown"
         let strategies = strategyCascade(for: policy, target: target, bundleIdentifier: app.bundleIdentifier)
 
         for (index, strategy) in strategies.enumerated() {
+            guard !Task.isCancelled, inputRevision() == input else { return nil }
             if index > 0 {
                 let previous = strategies[index - 1]
                 Log.selection.debug("coordinator: \(previous.rawValue, privacy: .public) produced no text for \(bundleID, privacy: .public); falling back to \(strategy.rawValue, privacy: .public)")
@@ -140,6 +149,7 @@ public struct SelectionRetrievalCoordinator: Sendable {
                 } else {
                     Log.selection.debug("coordinator: primary \(strategy.rawValue, privacy: .public) succeeded for \(bundleID, privacy: .public)")
                 }
+                guard !Task.isCancelled, inputRevision() == input else { return nil }
                 return await enrichRichContent(result, strategy: strategy, app: app, target: target)
             }
         }
@@ -165,6 +175,7 @@ public struct SelectionRetrievalCoordinator: Sendable {
         guard bundleIsBrowser || target.webArea != nil || target.role == "AXWebArea" else { return result }
         Log.selection.debug("coordinator: text-only web selection; enriching via pasteboard rich capture")
         guard let captured = Self.nonBlank(await run(.keyboardCopy, app: app, target: target)),
+              captured.text == result.text,
               captured.html != nil || captured.rtf != nil else {
             return result
         }
@@ -238,6 +249,17 @@ public struct SelectionRetrievalCoordinator: Sendable {
         app: AppIdentity,
         target: AXElementInspector.Target
     ) async -> TextResult? {
+        guard !Task.isCancelled else { return nil }
+        if let focusedApp = target.focusedApp {
+            var pid: pid_t = 0
+            guard AXUIElementGetPid(focusedApp, &pid) == .success else { return nil }
+            let targetPID = pid
+            let isCurrent = await MainActor.run {
+                let current = NSWorkspace.shared.frontmostApplication
+                return current?.processIdentifier == targetPID && current?.bundleIdentifier == app.bundleIdentifier
+            }
+            guard isCurrent, !Task.isCancelled else { return nil }
+        }
         switch strategy {
         case .axTextControl:
             return AXTextControlStrategy.read(from: target)
@@ -248,17 +270,20 @@ public struct SelectionRetrievalCoordinator: Sendable {
             var snapshot: AXElementInspector.Target? = target
             var attempts = 0
             while attempts < Constants.webAreaSettleMaxRetries {
-                if let snapshot, let result = AXWebAreaStrategy.read(from: snapshot) {
-                    return result
+                if let snapshot {
+                    guard let read = await Self.withAXWatchdog(operation: {
+                        AXWebAreaStrategy.read(from: snapshot)
+                            ?? snapshot.webArea.flatMap { AXWebAreaStrategy.pollFresh(from: $0) }
+                    }) else { return nil }
+                    if let read { return read }
                 }
+                guard !Task.isCancelled else { return nil }
                 attempts += 1
                 if attempts < Constants.webAreaSettleMaxRetries {
                     try? await Task.sleep(nanoseconds: UInt64(Constants.webAreaSettleInterval * 1_000_000_000))
-                    if let element = snapshot?.webArea ?? snapshot?.focusedElement,
-                       let result = AXWebAreaStrategy.pollFresh(from: element) {
-                        return result
-                    }
+                    guard !Task.isCancelled else { return nil }
                     snapshot = await inspectWithWatchdog()
+                    guard snapshot != nil else { return nil }
                 }
             }
             return nil
@@ -275,13 +300,23 @@ public struct SelectionRetrievalCoordinator: Sendable {
             switch strategy {
             case .menuCopy:
                 let press = menuPress
+                let inputRevision = self.inputRevision
                 trigger = {
+                    guard !Task.isCancelled else { return }
+                    let input = inputRevision()
                     Task.detached {
-                        await Self.pressCopyMenuWithWatchdog(app: target.focusedApp, press: press)
+                        await Self.pressCopyMenuWithWatchdog(app: target.focusedApp, press: { element in
+                            guard inputRevision() == input else { return }
+                            press(element)
+                        })
                     }
                 }
             case .keyboardCopy:
-                trigger = { SessionEventTapPoster().postKey(keyCode: Constants.copyVirtualKey, flags: .maskCommand) }
+                trigger = {
+                    guard !Task.isCancelled,
+                          NSWorkspace.shared.frontmostApplication?.bundleIdentifier == app.bundleIdentifier else { return }
+                    SessionEventTapPoster().postKey(keyCode: Constants.copyVirtualKey, flags: .maskCommand)
+                }
             default:
                 return nil
             }
@@ -314,13 +349,19 @@ public struct SelectionRetrievalCoordinator: Sendable {
     /// Whichever side settles the continuation (worker or watchdog) also frees its concurrency
     /// permit, so the gate is never held past the caller's budget by a still-blocked worker.
     private func inspectWithWatchdog() async -> AXElementInspector.Target? {
+        await Self.withAXWatchdog(operation: inspect)
+    }
+
+    private static func withAXWatchdog<Value: Sendable>(
+        operation: @escaping @Sendable () -> Value
+    ) async -> Value? {
+        guard !Task.isCancelled else { return nil }
         guard await Self.inspectGate.tryAcquire(limit: Constants.axMaxConcurrentInspects) else {
             Log.selection.debug("coordinator: inspect concurrency cap reached; skipping read")
             return nil
         }
-        let inspect = self.inspect
-        return await withCheckedContinuation { (continuation: CheckedContinuation<AXElementInspector.Target?, Never>) in
-            let resume = OnceResume<AXElementInspector.Target?>()
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Value?, Never>) in
+            let resume = OnceResume<Value?>()
             let timeout = TaskBox()
 
             timeout.set(Task {
@@ -332,7 +373,7 @@ public struct SelectionRetrievalCoordinator: Sendable {
             })
 
             Self.axInspectQueue.async {
-                let target = inspect()
+                let target = operation()
                 if resume.resume(continuation, with: target) {
                     timeout.cancel()
                     Task.detached { await Self.inspectGate.release() }
@@ -366,7 +407,7 @@ public struct SelectionRetrievalCoordinator: Sendable {
     /// Best-effort: a failed lookup performs no press and the pasteboard capture times out.
     @usableFromInline
     static func pressEditCopyMenu(app: AXUIElement?) {
-        AXMenuNavigator.press(.copy, in: app)
+        AXMenuNavigator.press(.copy, in: app, deadline: Date().addingTimeInterval(Constants.axReadTimeout))
     }
 
     /// Starts the Edit ▸ Copy press on `axInspectQueue`.

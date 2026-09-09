@@ -82,3 +82,12 @@ OpenClip enforces a strict single-responsibility architecture divided across **C
 4. **Action Factory** — [`DefaultActionFactory`](../Sources/OpenClip/Platform/Extensions/DefaultActionFactory.swift) (Action creation from manifests/snippets).
 5. **Action Result Handler** — [`ActionResultHandler`](../Sources/OpenClip/Platform/Effects/ActionResultHandler.swift) (Platform side-effects, pasteboard, and key events).
 6. **Action Coordinator & Composition** — [`ActionCoordinator`](../Sources/Core/Actions/ActionCoordinator.swift) (Composition root; wires managers to the registry via `onRegister`/`onUnregister` callbacks).
+
+## Personal extensions
+
+- [日常翻译与 LLM 文本翻译](../local-extensions/README.md) — 本机插件配置、行为和验证。
+
+## Personal maintenance
+
+- [Upstream v1.4.0 assessment](upstream/v1.4.0-assessment.md)
+- [Historical upstream changelog](upstream/historical-changelog.md)

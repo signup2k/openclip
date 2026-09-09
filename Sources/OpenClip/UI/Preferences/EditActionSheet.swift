@@ -130,7 +130,8 @@ public struct EditActionSheet: View {
                         iconSymbol: $iconSymbol,
                         initialIconSymbol: initialIconSymbol,
                         baseIcon: baseIconState,
-                        displayMode: $displayMode
+                        displayMode: $displayMode,
+                        textGlyphFallbackSymbol: Self.iconModeFallbackSymbol(for: action)
                     )
                 }
                 .disabled(manifestMissing)
@@ -310,13 +311,7 @@ public struct EditActionSheet: View {
         initialStoredSymbol = Self.sanitizedStoredSymbol(override?.customIconSymbol, actionIcon: action.icon)
         seedBaseline(from: ActionCustomizationManager.shared.popupIcon(for: action))
 
-        if override?.customIconText != nil {
-            displayMode = 1
-        } else if case .text = action.icon {
-            displayMode = 1
-        } else {
-            displayMode = 0
-        }
+        displayMode = Self.initialDisplayMode(override: override, actionIcon: action.icon)
 
         if isBuiltin {
             manifestState = nil
@@ -426,10 +421,12 @@ public struct EditActionSheet: View {
 
     private func saveAppearanceOverride() {
         let titleOverride: String? = (customTitle.isEmpty || customTitle == action.title) ? nil : customTitle
-        let symbolOverride = Self.resolvedSymbolOverride(
+        let symbolOverride = Self.resolvedIconModeSymbolOverride(
+            displayMode: displayMode,
             current: iconSymbol,
             initial: initialIconSymbol,
-            stored: initialStoredSymbol
+            stored: initialStoredSymbol,
+            action: action
         )
         let textOverride: String? = (displayMode == 1) ? (customTitle.isEmpty ? action.title : customTitle) : nil
 
@@ -439,6 +436,31 @@ public struct EditActionSheet: View {
             symbol: symbolOverride,
             text: textOverride
         )
+    }
+
+    static func initialDisplayMode(override: ActionOverride?, actionIcon: ActionIcon) -> Int {
+        if override?.customIconText != nil { return 1 }
+        if override?.customIconSymbol != nil { return 0 }
+        if case .text = actionIcon { return 1 }
+        return 0
+    }
+
+    static func iconModeFallbackSymbol(for action: any Action) -> String? {
+        guard case .text = action.icon, ActionIdentity.isBuiltin(action) else { return nil }
+        return (action as? any ConfigurableAction)?.preferenceIconName
+    }
+
+    static func resolvedIconModeSymbolOverride(
+        displayMode: Int,
+        current: String,
+        initial: String,
+        stored: String?,
+        action: any Action
+    ) -> String? {
+        let fromField = resolvedSymbolOverride(current: current, initial: initial, stored: stored)
+        if let fromField { return fromField }
+        guard displayMode == 0 else { return nil }
+        return iconModeFallbackSymbol(for: action)
     }
 
     // MARK: - Appearance save decisions (pure, unit-tested)

@@ -23,7 +23,7 @@ final class TextRetrieverTests: XCTestCase {
 
     @MainActor
     func testTextRetrieverRetrievesSelectedText() async throws {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.makeTarget(selectedText: nil) },
             browserRead: { _ in nil },
             copyCapture: { _ in nil }
@@ -38,7 +38,7 @@ final class TextRetrieverTests: XCTestCase {
 
     @MainActor
     func testTextRetrieverSurfacesFoundText() async throws {
-        let coordinator = SelectionRetrievalCoordinator(
+        let coordinator = SelectionRetrievalCoordinator(inputRevision: { [] },
             inspect: { Self.makeTarget(selectedText: "Sample Selection") },
             browserRead: { _ in nil },
             copyCapture: { _ in nil }

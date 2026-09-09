@@ -53,6 +53,7 @@ interface OpenClipBridge {
   };
 
   // Effect functions (call order is preserved):
+  preview(value: string): void; // Always shows a result card, regardless of delivery preference.
   paste(value: string): void;
   copy(value: string): void;
   pasteContent(payload: { 'public.utf8-plain-text'?: string; 'public.html'?: string; 'public.rtf'?: string } | { text?: string; html?: string; rtf?: string }): void;
@@ -189,7 +190,7 @@ script enters its promise pump loop, the sync gate is released while the watchdo
 1. A JavaScript exception → `.toast(.error, message)` (never thrown as a Swift error).
 2. `requireConfiguration(...)` → `.openConfiguration`.
 3. `toast(...)` — alone → `.toast`, or coexisting with effects → `.sequence([.toast, …effects])`.
-4. Effects (paste/copy/pasteContent/copyContent/cut/openURL/keyPress/runShortcut/notify) → single
+4. Effects (preview/paste/copy/pasteContent/copyContent/cut/openURL/keyPress/runShortcut/notify) → single
    `.paste`/`.copy`/etc, or `.sequence` of them when multiple were called. `pasteContent`/
    `copyContent` payloads are read via either key style (`public.utf8-plain-text`/`public.html`/
    `public.rtf` or `text`/`html`/`rtf`); a payload with none of the three is ignored (no effect).
@@ -199,6 +200,8 @@ script enters its promise pump loop, the sync gate is released while the watchdo
 
 A JavaScript exception produces `.toast(.error, message)` instead of throwing; the toast dismisses
 the popup by default (`keepVisible: true` keeps it open).
+
+`openclip.preview(text)` explicitly returns a preview card, while `return text` follows the global per-click preference. Use `openclip.preview` alone when previewing; combining it with other effects creates a sequence and is not a supported card workflow.
 
 ## Practical Examples
 

@@ -1,20 +1,21 @@
 #!/bin/bash
 # Builds OpenClip in Release mode and packages it into build/OpenClip.zip
 
-set -e
+set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
+DERIVED_DATA="$PROJECT_DIR/build/DerivedData"
 
 echo "Generating Xcode project..."
 xcodegen generate
 
 echo "Building OpenClip (Release)..."
-xcodebuild -project OpenClip.xcodeproj -scheme OpenClip -configuration Release -destination 'generic/platform=macOS' ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO build > /dev/null
+xcodebuild -project OpenClip.xcodeproj -derivedDataPath "$DERIVED_DATA" -scheme OpenClip -configuration Release -destination 'generic/platform=macOS' ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO build > /dev/null
 
-BUILT_APP="$(find ~/Library/Developer/Xcode/DerivedData/OpenClip-*/Build/Products/Release -name "OpenClip.app" | head -n 1)"
+BUILT_APP="$DERIVED_DATA/Build/Products/Release/OpenClip.app"
 
-if [ -z "$BUILT_APP" ]; then
+if [ ! -d "$BUILT_APP" ]; then
     echo "Error: Release build output not found."
     exit 1
 fi

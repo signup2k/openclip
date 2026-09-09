@@ -527,7 +527,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func openReportIssue() {
-        if let url = URL(string: "https://github.com/ganeshmshetty/openclip/issues") {
+        if let url = URL(string: "https://github.com/signup2k/openclip/issues") {
             NSWorkspace.shared.open(url)
         }
     }

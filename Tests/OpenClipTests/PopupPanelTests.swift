@@ -712,7 +712,7 @@ final class PopupPanelTests: XCTestCase {
         XCTAssertEqual(panel.frame.origin.x, 200)
     }
 
-    func testEnterSearchWithButtonAnchorCentersSearchOnButton() throws {
+    func testEnterSearchHonorsButtonPlacementAndRestoresBar() throws {
         guard let screen = NSScreen.main else { throw XCTSkip("no screen") }
         let cursor = CGPoint(x: screen.visibleFrame.midX, y: screen.visibleFrame.maxY - 200)
         let controller = try shownPanel(for: cursor)
@@ -720,17 +720,23 @@ final class PopupPanelTests: XCTestCase {
         let panel = try visiblePanel()
 
         let initialBarFrame = panel.frame
-        let buttonLocalX: CGFloat = 250
         let buttonWidth: CGFloat = 34
+        let buttonLocalX = max(0, initialBarFrame.width - buttonWidth)
         let buttonLocalFrame = CGRect(x: buttonLocalX, y: 0, width: buttonWidth, height: 29)
-        let expectedButtonScreenMidX = initialBarFrame.minX + buttonLocalFrame.midX
+        // Placement policy caps the palette at the bar's right edge and screen bounds.
+        // The controller must apply that position even while resizing from the action bar.
+        let expectedMidX = PopupPositioner.searchPaletteMidX(
+            buttonScreenMidX: initialBarFrame.minX + buttonLocalFrame.midX,
+            barMaxX: initialBarFrame.maxX,
+            screenBounds: screen.visibleFrame
+        )
 
         controller.enterSearch(buttonLocalFrame: buttonLocalFrame)
         waitForSearchResize(panel, barHeight: initialBarFrame.height)
 
         let searchFrame = panel.frame
-        XCTAssertEqual(searchFrame.midX, expectedButtonScreenMidX, accuracy: 2.0,
-                       "Search palette should be centered horizontally on the clicked button")
+        XCTAssertEqual(searchFrame.midX, expectedMidX, accuracy: 2.0,
+                       "Search palette should honor button placement and edge constraints")
 
         controller.exitSearch()
         waitForSearchCollapse(panel, barHeight: initialBarFrame.height)

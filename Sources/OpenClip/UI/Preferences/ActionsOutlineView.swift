@@ -26,7 +26,7 @@ final class OutlineNode: NSObject {
     }
 
     let id: String
-    let kind: Kind
+    var kind: Kind
     var children: [OutlineNode]
 
     init(id: String, kind: Kind, children: [OutlineNode] = []) {
@@ -73,6 +73,34 @@ final class OutlineNode: NSObject {
         guard let other = object as? OutlineNode else { return false }
         return id == other.id
     }
+    func signature(using customization: ActionCustomizationManager) -> String {
+        var sig = id + ":"
+        switch kind {
+        case .customGroup(let def, let action):
+            let p = customization.presented(action, surface: .table)
+            sig += "cg:\(def.title):\(def.iconName):\(def.memberActionIDs.joined(separator: ",")):\(p.title):\(String(describing: p.icon))"
+        case .extensionGroup(let action):
+            let p = customization.presented(action, surface: .table)
+            sig += "eg:\(p.title):\(String(describing: p.icon))"
+        case .standaloneAction(let action):
+            let p = customization.presented(action, surface: .table)
+            sig += "sa:\(p.title):\(String(describing: p.icon))"
+        case .packageHeader(let pkgID, let title, let gatedReason):
+            sig += "ph:\(pkgID):\(title):\(String(describing: gatedReason))"
+        case .groupMember(let action, let parentGroupID):
+            let p = customization.presented(action, surface: .table)
+            sig += "gm:\(parentGroupID):\(p.title):\(String(describing: p.icon))"
+        case .extensionSubAction(let action, let parentGroupID):
+            let p = customization.presented(action, surface: .table)
+            sig += "es:\(parentGroupID):\(p.title):\(String(describing: p.icon))"
+        }
+        if !children.isEmpty {
+            sig += "[" + children.map { $0.signature(using: customization) }.joined(separator: ";") + "]"
+        }
+        return sig
+    }
+
+
 }
 
 // MARK: - Outline Cell View
@@ -219,6 +247,7 @@ struct ActionsOutlineView: NSViewRepresentable {
 
         context.coordinator.outlineView = outlineView
         context.coordinator.rebuildTree()
+        outlineView.reloadData()
 
         scrollView.documentView = outlineView
         return scrollView
@@ -239,13 +268,17 @@ final class ActionsOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutl
     private(set) var rootNodes: [OutlineNode] = []
     private var expandedNodeIDs: Set<String> = []
     private var isSyncingSelection = false
+    // Cache values at the previous render; comparing two trees against today's live
+    // customization store would hide title/icon changes made since that render.
+    private var renderedSignature: [String] = []
 
     init(_ parent: ActionsOutlineView) {
         self.parent = parent
         super.init()
     }
 
-    func rebuildTree() {
+    @discardableResult
+    func rebuildTree() -> Bool {
         let actions = parent.coordinator.actions
         let groupDefs = parent.coordinator.actionGroupDefs
 
@@ -334,17 +367,38 @@ final class ActionsOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutl
             }
         }
 
+        let signature = newRoots.map { $0.signature(using: parent.customizationManager) }
+        guard signature != renderedSignature else {
+            refreshActions(old: rootNodes, new: newRoots)
+            return false
+        }
+        renderedSignature = signature
         self.rootNodes = newRoots
+        return true
+    }
+
+    private func refreshActions(old: [OutlineNode], new: [OutlineNode]) {
+        for (oldNode, newNode) in zip(old, new) {
+            oldNode.kind = newNode.kind
+            refreshActions(old: oldNode.children, new: newNode.children)
+        }
     }
 
     func syncWithParent() {
         guard let outlineView else { return }
-        rebuildTree()
-        outlineView.reloadData()
-
-        // Restore expansion state
-        for node in rootNodes where expandedNodeIDs.contains(node.id) {
-            outlineView.expandItem(node)
+        if rebuildTree() {
+            outlineView.reloadData()
+            for node in rootNodes where expandedNodeIDs.contains(node.id) {
+                outlineView.expandItem(node)
+            }
+        } else {
+            // Reuse the hosting views so row-local popover state survives navigation/toggles.
+            // Updating their root value refreshes bindings and same-ID action replacements.
+            for row in 0..<outlineView.numberOfRows {
+                guard let node = outlineView.item(atRow: row) as? OutlineNode,
+                      let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? OutlineCellView else { continue }
+                configure(cell, for: node)
+            }
         }
 
         // Sync selection from parent
@@ -403,6 +457,11 @@ final class ActionsOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutl
             cellView.identifier = identifier
         }
 
+        configure(cellView, for: node)
+        return cellView
+    }
+
+    private func configure(_ cellView: OutlineCellView, for node: OutlineNode) {
         switch node.kind {
         case .packageHeader(let packageID, let title, let gatedReason):
             cellView.setContent(
@@ -433,8 +492,8 @@ final class ActionsOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutl
             )
         }
 
-        return cellView
     }
+
 
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
         let identifier = NSUserInterfaceItemIdentifier("OutlineTableRowView")

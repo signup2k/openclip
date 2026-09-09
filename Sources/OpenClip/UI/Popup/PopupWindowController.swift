@@ -78,8 +78,15 @@ public class PopupWindowController {
     /// its original context. Internal for tests.
     var inFlightDeliveryContext: DeliveryContext? = nil
 
-    /// Provider for the current frontmost application. Defaults to NSWorkspace.shared.frontmostApplication.
-    /// Injected for testing app-switching scenarios.
+    /// Input since perform can move the selection or target window, even within the same app.
+    /// System counters are non-blocking; ignore motion and key-up so the triggering click settles normally.
+    var pasteInteractionStampProvider: @MainActor () -> [UInt32] = {
+        [CGEventType.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown].map {
+            CGEventSource.counterForEventType(.combinedSessionState, eventType: $0)
+        }
+    }
+
+    /// Provider for the current frontmost application; injected for app-switching tests.
     var frontmostApplicationProvider: @MainActor () -> NSRunningApplication? = {
         NSWorkspace.shared.frontmostApplication
     }
@@ -433,7 +440,11 @@ public class PopupWindowController {
                 screenBounds: screenBounds
             )
 
+            // This is an intentional move to the clicked button; resize anchoring would
+            // otherwise overwrite its origin with the old action bar's center.
+            panel.horizontalAnchor = .none
             panel.setFrame(CGRect(x: clampedMidX - searchPanelWidth / 2, y: panel.frame.origin.y, width: searchPanelWidth, height: panel.frame.height), display: false)
+            panel.horizontalAnchor = .center
         }
 
         enterKeyMode()
@@ -491,7 +502,9 @@ public class PopupWindowController {
         // leaving the search-mode value behind. Cleared by show()/hide() before placement.
         panel?.pinBottomEdgeOnResize = modeStore.searchResultsAbove
         if let preSearchFrame, let panel {
+            panel.horizontalAnchor = .none
             panel.setFrame(CGRect(x: preSearchFrame.origin.x, y: panel.frame.origin.y, width: preSearchFrame.width, height: panel.frame.height), display: false)
+            panel.horizontalAnchor = .center
         }
         preSearchFrame = nil
         exitKeyMode() // reactivates previousFrontmostApp but keeps it for the session
@@ -862,6 +875,7 @@ public class PopupWindowController {
                 hide()
             }
         case .keyDown:
+            guard event.cgEvent?.getIntegerValueField(.eventSourceUserData) != SessionEventTapPoster.syntheticEventTag else { return }
             // Actions mode: any keystroke (including Escape) dismisses the popup; the panel is
             // never key here, so keys land in the source app and are merely observed.
             // Search mode: keys go to the search field (panel is key); Escape is handled there.
@@ -1287,6 +1301,7 @@ public class PopupWindowController {
         /// The selection context captured before any early-close (loading actions), used to re-show
         /// the popup as a preview card. nil when the popup never closed.
         let selection: SelectionContext?
+        var interactionStamp: [UInt32]? = nil
     }
 
     /// Snapshots the delivery inputs from the current session state. Called on the main actor,
@@ -1306,7 +1321,8 @@ public class PopupWindowController {
             preference: preference(for: intent),
             actionTitle: title,
             actionIcon: icon,
-            selection: currentActionContext?.selection
+            selection: currentActionContext?.selection,
+            interactionStamp: pasteInteractionStampProvider()
         )
     }
 
@@ -1375,7 +1391,7 @@ public class PopupWindowController {
         return Task { @MainActor in
             do {
                 let resolved = await resolveDelivery(effect, delivery: delivery, suppressDeliveryToast: suppressDeliveryToast)
-                if case .text(let text) = resolved.result {
+                if let text = previewText(resolved.result) {
                     // Preview preference: render the returned text in the native AI result card
                     // without delivering any effect. The popup stays open (a top-level `.text` never
                     // dismisses via dismissesPopup); Esc collapses via exitContent. Probe paste
@@ -1437,7 +1453,8 @@ public class PopupWindowController {
         let resolved = ActionResultDelivery.resolve(
             raw: result,
             clickIntent: delivery.clickIntent,
-            canPaste: canPaste,
+            canPaste: canPaste && isTargetApplicationActive(delivery.application)
+                && (delivery.interactionStamp.map { $0 == pasteInteractionStampProvider() } ?? true),
             delivery: delivery.delivery ?? .none,
             preference: preference
         )
@@ -1445,8 +1462,10 @@ public class PopupWindowController {
     }
 
     private func isPaste(_ result: ActionResult?) -> Bool {
-        guard case .paste = result else { return false }
-        return true
+        switch result {
+        case .paste, .pasteContent: return true
+        default: return false
+        }
     }
 
     /// Resolves the user's chosen behavior for a click from the two General-tab settings. Unknown
@@ -1455,6 +1474,13 @@ public class PopupWindowController {
         let key: SettingKey<String> = clickIntent == .primary ? .primaryClickBehavior : .secondaryClickBehavior
         return ResultDeliveryPreference(rawValue: settingsStore.get(key))
             ?? (clickIntent == .primary ? .paste : .copy)
+    }
+
+    private func previewText(_ result: ActionResult) -> String? {
+        switch result {
+        case .text(let text), .preview(let text): return text
+        default: return nil
+        }
     }
 
     private func isText(_ result: ActionResult) -> Bool {
@@ -1507,7 +1533,8 @@ public class PopupWindowController {
             preference: preference,
             actionTitle: action.title,
             actionIcon: action.displayIcon(using: ActionCustomizationManager.shared),
-            selection: context.selection
+            selection: context.selection,
+            interactionStamp: pasteInteractionStampProvider()
         )
         inFlightDeliveryContext = delivery
         usageStore.record(action.id)
@@ -1555,7 +1582,8 @@ public class PopupWindowController {
             preference: preference(for: clickIntent),
             actionTitle: action.title,
             actionIcon: action.displayIcon(using: ActionCustomizationManager.shared),
-            selection: context.selection
+            selection: context.selection,
+            interactionStamp: pasteInteractionStampProvider()
         )
         inFlightDeliveryContext = delivery
         usageStore.record(action.id)
@@ -1624,7 +1652,7 @@ public class PopupWindowController {
             let effect = result
             do {
                 let resolved = await resolveDelivery(effect, delivery: delivery, suppressDeliveryToast: suppressDeliveryToast)
-                if case .text(let text) = resolved.result {
+                if let text = previewText(resolved.result) {
                     // Preview preference on a loading action: the popup early-closed for the spinner,
                     // so hide the spinner and re-show the popup as a content-mode card, anchored to
                     // the original selection (captured before the early close). Re-probe so the card

@@ -426,5 +426,6 @@
   "Pause in %@": "在 %@ 中暫停",
   "Paused in %@": "已在 %@ 中暫停",
   "Pause in App": "在應用中暫停",
-  "Resume OpenClip (%lldm left)": "恢復 OpenClip (剩餘 %lld 分鐘)"
+  "Resume OpenClip (%lldm left)": "恢復 OpenClip (剩餘 %lld 分鐘)",
+  "Personal build. Install updates manually.": "個人版本，請手動安裝更新。"
 }

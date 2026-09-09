@@ -90,7 +90,7 @@ public struct PreferencesView: View {
                 // Bottom footer icons (Help and GitHub - NO TEXT)
                 HStack(spacing: 14) {
                     Button(action: {
-                        if let url = URL(string: "https://www.getopenclip.app/docs") {
+                        if let url = URL(string: "https://github.com/signup2k/openclip/blob/main/docs/index.md") {
                             NSWorkspace.shared.open(url)
                         }
                     }) {
@@ -103,7 +103,7 @@ public struct PreferencesView: View {
                     .accessibilityLabel("Documentation")
                     
                     Button(action: {
-                        if let url = URL(string: "https://github.com/ganeshmshetty/openclip") {
+                        if let url = URL(string: "https://github.com/signup2k/openclip") {
                             NSWorkspace.shared.open(url)
                         }
                     }) {

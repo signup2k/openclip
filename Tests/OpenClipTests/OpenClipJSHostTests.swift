@@ -121,6 +121,54 @@ final class OpenClipJSHostTests: XCTestCase {
         return OpenClipJSHost(session: URLSession(configuration: config))
     }
 
+    private func translationScript(_ name: String) throws -> String {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return try String(contentsOf: root.appendingPathComponent("local-extensions/\(name).openclipext/main.js"), encoding: .utf8)
+    }
+
+    func testLLMTranslationSourceUsesNativeBooleanForBilingualPaste() async throws {
+        let payload: [String: Any] = ["choices": [["finish_reason": "stop", "message": ["content": "{\"translations\":[{\"id\":0,\"text\":\"你好\"}]}" ]]]]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+        }
+        defer { MockURLProtocol.requestHandler = nil }
+        let script = try translationScript("LLMTranslate")
+        for keep in [false, true] {
+            let options = [
+                ExtensionOption(identifier: "baseURL", label: "URL", type: .string, defaultValue: "https://example.com/v1"),
+                ExtensionOption(identifier: "model", label: "Model", type: .string, defaultValue: "test-model"),
+                ExtensionOption(identifier: "keepOriginal", label: "Keep", type: .boolean, defaultValue: keep ? "true" : "false")
+            ]
+            let result = try await makeMockedHost().run(makeRequest(script: script, options: options, isAsync: true))
+            guard case .paste(let text) = result else { return XCTFail("Expected paste, got \(result)") }
+            XCTAssertEqual(text, keep ? "hello\n你好" : "你好")
+        }
+        XCTAssertEqual(MockURLProtocol.capturedRequests.values.count, 2)
+        XCTAssertTrue(MockURLProtocol.capturedRequests.values.allSatisfy { $0.url?.path == "/v1/chat/completions" && $0.httpMethod == "POST" })
+    }
+
+    func testQuickTranslationSourceReturnsExplicitPreview() async throws {
+        let data = Data("[[[\"你好\",\"hello\"]]]".utf8)
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+        }
+        defer { MockURLProtocol.requestHandler = nil }
+        let result = try await makeMockedHost().run(makeRequest(script: try translationScript("QuickTranslate"), isAsync: true))
+        guard case .preview(let text) = result else { return XCTFail("Expected preview, got \(result)") }
+        XCTAssertEqual(text, "你好")
+        XCTAssertFalse(result.dismissesPopup)
+    }
+
+    func testExplicitPreviewIsAnEffectAndOverridesImplicitReturn() async throws {
+        let result = try await host.run(makeRequest(script: "function action() { openclip.preview('译文'); return 'must not paste'; }"))
+        guard case .preview(let text) = result else {
+            return XCTFail("Expected explicit preview, got \(result)")
+        }
+        XCTAssertEqual(text, "译文")
+        XCTAssertFalse(result.dismissesPopup)
+    }
+
     func testPasteEffectReturnsPaste() async throws {
         let result = try await host.run(makeRequest(script: "openclip.paste('Hello World');"))
         guard case .paste(let text) = result else {

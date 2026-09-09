@@ -2,30 +2,17 @@
 
 <img src="./assets/app-icon.png" alt="OpenClip icon" align="center" width="96" height="96" />
 
-# OpenClip — The open-source macOS text utility
+# OpenClip — Personal macOS text utility
 
-**Official repository: [github.com/ganeshmshetty/openclip](https://github.com/ganeshmshetty/openclip)**
+**Personal repository: [signup2k/openclip](https://github.com/signup2k/openclip)**
+
+Independently maintained from local **v1.0.0**, based on [ganeshmshetty/openclip](https://github.com/ganeshmshetty/openclip).
+Upstream features and fixes are reviewed periodically and ported selectively. Local versions and
+updates follow their own release history; see [upstream assessments](docs/upstream/v1.4.0-assessment.md).
 
 [![macOS](https://img.shields.io/badge/macOS-14.0+-black?style=flat-square&logo=apple&logoColor=white)](https://support.apple.com/sonoma)
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange?style=flat-square&logo=swift&logoColor=white)](https://www.swift.org)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
-[![Homebrew](https://img.shields.io/badge/Homebrew-OpenClip-ffcc00?style=flat-square&logo=homebrew&logoColor=black)](https://github.com/ganeshmshetty/homebrew-tap)
-[![AlternativeTo](https://img.shields.io/badge/AlternativeTo-OpenClip-0081C6?style=flat-square&logo=alternativeto&logoColor=white)](https://alternativeto.net/software/openclip/about/?utm_source=badge&utm_medium=referral)
-[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/sy4MeFxf8)
-[![Product Hunt](https://img.shields.io/badge/Product%20Hunt-OpenClip-DA552F?style=flat-square&logo=producthunt&logoColor=white)](https://www.producthunt.com/products/openclip)
-<br />
-
-<a href="https://github.com/sponsors/ganeshmshetty" target="_blank">
-  <img src="https://img.shields.io/badge/Sponsor%20on%20GitHub-EA4AAA?style=for-the-badge&logo=github-sponsors&logoColor=white" height="32" alt="Sponsor on GitHub" />
-</a>
-<a href="https://buymeacoffee.com/ganeshmshetty" target="_blank">
-  <img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black" height="32" alt="Buy Me A Coffee" />
-</a>
-
-<br />
-<br />
-<br />
-
 <img src="./assets/all.gif" alt="OpenClip in action" />
 
 </div>
@@ -59,15 +46,17 @@ Select any text in any app, and OpenClip appears with contextual actions — cop
 
 ## Installation
 
-### Homebrew (Recommended)
+Build this personal version locally:
 
 ```bash
-brew install --cask ganeshmshetty/tap/openclip
+./scripts/dev_run.sh       # Debug build and launch
+./scripts/release_update.sh # Release ZIP and DMG in build/release/
 ```
 
-### Direct Download
+Automatic app updates are disabled until a personal signed update feed is configured. Upstream
+installers and Homebrew packages contain the upstream version and can replace personal changes.
 
-1. Download the latest release (`.dmg`) directly from [getopenclip.app/download](https://getopenclip.app/download) (or browse all assets on the [releases page](https://github.com/ganeshmshetty/openclip/releases)).
+1. Build the release packages above, then open the generated `.dmg`.
 2. Drag `OpenClip.app` into your `/Applications` folder.
 3. Launch OpenClip and grant **Accessibility** permission when prompted:
 
@@ -148,7 +137,7 @@ or chained effects — from JSON emitted by a shell script.
 **Prerequisites:** macOS 14+, [Xcode 16+](https://apps.apple.com/us/app/xcode/id497799835), and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 
 ```bash
-git clone https://github.com/ganeshmshetty/openclip.git
+git clone https://github.com/signup2k/openclip.git
 cd openclip
 
 # Populate the extension catalog submodule
@@ -187,7 +176,7 @@ The full technical documentation lives in the [`docs/`](docs/index.md) hub:
 - 💬 **Discord**: [Join our Discord community](https://discord.gg/sy4MeFxf8) to share custom extensions, request features, and get support.
 - ⭐️ **AlternativeTo**: Find and support OpenClip on [AlternativeTo](https://alternativeto.net/software/openclip/about/?utm_source=badge&utm_medium=referral).
 - 🚀 **Product Hunt**: Check out our launch on [Product Hunt](https://www.producthunt.com/products/openclip).
-- 🐛 **Issues & Feedback**: Report bugs or suggest ideas on [GitHub Issues](https://github.com/ganeshmshetty/openclip/issues).
+- 🐛 **Issues & Feedback**: Report bugs or suggest ideas on [GitHub Issues](https://github.com/signup2k/openclip/issues).
 
 ## License
 

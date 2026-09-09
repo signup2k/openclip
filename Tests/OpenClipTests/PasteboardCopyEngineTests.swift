@@ -19,7 +19,7 @@ final class PasteboardCopyEngineTests: XCTestCase {
         pasteboard.setString("Original", forType: .string)
 
         let engine = PasteboardCopyEngine()
-        let captured = await engine.capture(pasteboard: pasteboard) {
+        let captured = await engine.capture(pasteboard: pasteboard, inputRevision: { [] }) {
             pasteboard.clearContents()
             pasteboard.setString("Copied", forType: .string)
         }
@@ -42,7 +42,7 @@ final class PasteboardCopyEngineTests: XCTestCase {
         pasteboard.setString("Original", forType: .string)
 
         let engine = PasteboardCopyEngine()
-        let captured = await engine.capture(pasteboard: pasteboard) {
+        let captured = await engine.capture(pasteboard: pasteboard, inputRevision: { [] }) {
             pasteboard.clearContents()
             pasteboard.setString("Original", forType: .string)
         }
@@ -62,7 +62,8 @@ final class PasteboardCopyEngineTests: XCTestCase {
         let captured = await engine.capture(
             pasteboard: pasteboard,
             timeout: 0.05,
-            restoreDelay: 0.05
+            restoreDelay: 0.05,
+            inputRevision: { [] }
         ) {
             // Trigger never copies: the changeCount never advances.
         }
@@ -83,7 +84,8 @@ final class PasteboardCopyEngineTests: XCTestCase {
         let captured = await engine.capture(
             pasteboard: pasteboard,
             timeout: 0.05,
-            restoreDelay: 0.05
+            restoreDelay: 0.05,
+            inputRevision: { [] }
         ) {
             // Trigger copies whitespace: advances changeCount, but yields no substantial text
             pasteboard.clearContents()
@@ -146,7 +148,8 @@ final class PasteboardCopyEngineTests: XCTestCase {
         let captured = await engine.capture(
             pasteboard: pasteboard,
             timeout: 0.05,
-            restoreDelay: 0.05
+            restoreDelay: 0.05,
+            inputRevision: { [] }
         ) {
             // Trigger does not copy
         }
@@ -166,7 +169,8 @@ final class PasteboardCopyEngineTests: XCTestCase {
         let captured = await engine.capture(
             pasteboard: pasteboard,
             timeout: 1.0,
-            restoreDelay: 0.05
+            restoreDelay: 0.05,
+            inputRevision: { [] }
         ) {
             // Simulate the PopClip-style race: the changeCount advances with empty content first,
             // then the real selection lands a beat later.
@@ -188,7 +192,7 @@ final class PasteboardCopyEngineTests: XCTestCase {
         pasteboard.setString("Original", forType: .string)
 
         let engine = PasteboardCopyEngine()
-        let captured = await engine.capture(pasteboard: pasteboard) {
+        let captured = await engine.capture(pasteboard: pasteboard, inputRevision: { [] }) {
             pasteboard.clearContents()
             pasteboard.setString("Rich selection", forType: .string)
             pasteboard.setString("<b>Rich selection</b>", forType: .html)
@@ -213,7 +217,7 @@ final class PasteboardCopyEngineTests: XCTestCase {
         )
 
         let engine = PasteboardCopyEngine()
-        let captured = await engine.capture(pasteboard: pasteboard) {
+        let captured = await engine.capture(pasteboard: pasteboard, inputRevision: { [] }) {
             pasteboard.clearContents()
             pasteboard.setString("Rich selection", forType: .string)
             pasteboard.setData(rtfData, forType: .rtf)
@@ -222,6 +226,75 @@ final class PasteboardCopyEngineTests: XCTestCase {
         XCTAssertEqual(captured?.text, "Rich selection")
         XCTAssertNotNil(captured?.html)
         XCTAssertTrue(captured?.html?.contains("Rich selection") == true)
+    }
+
+    @MainActor
+    func testSyntheticEventSourceNeverSuppressesRealKeyboardInput() throws {
+        let source = try XCTUnwrap(SessionEventTapPoster.makeEventSource())
+        XCTAssertEqual(source.localEventsSuppressionInterval, 0)
+        XCTAssertEqual(source.userData, SessionEventTapPoster.syntheticEventTag)
+        for state: CGEventSuppressionState in [.eventSuppressionStateSuppressionInterval, .eventSuppressionStateRemoteMouseDrag] {
+            XCTAssertTrue(source.getLocalEventsFilterDuringSuppressionState(state).contains(.permitLocalKeyboardEvents))
+        }
+    }
+
+    @MainActor
+    func testUserCopyDuringCaptureIsNotRestoredOrReturnedAsSelection() async {
+        let pasteboard = makePasteboard()
+        pasteboard.setString("Original", forType: .string)
+        var revision: UInt32 = 0
+        let result = await PasteboardCopyEngine().capture(pasteboard: pasteboard, inputRevision: { [revision] }) {
+            revision += 1
+            pasteboard.clearContents()
+            pasteboard.setString("User copy", forType: .string)
+        }
+        XCTAssertNil(result)
+        XCTAssertEqual(pasteboard.string(forType: .string), "User copy")
+        XCTAssertNil(pasteboard.data(forType: PasteboardSnapshot.transientType))
+    }
+
+    @MainActor
+    func testCancelledCaptureDoesNotFireTrigger() async {
+        let pasteboard = makePasteboard()
+        pasteboard.setString("Original", forType: .string)
+        let task = Task { @MainActor in
+            await PasteboardCopyEngine().capture(pasteboard: pasteboard, inputRevision: { [] }) {
+                XCTFail("Cancelled task must not synthesize copy")
+            }
+        }
+        task.cancel()
+        let result = await task.value
+        XCTAssertNil(result)
+        XCTAssertEqual(pasteboard.string(forType: .string), "Original")
+    }
+
+    @MainActor
+    func testOverlappingCapturesRestoreTheOriginalClipboard() async throws {
+        let pasteboard = makePasteboard()
+        pasteboard.setString("Original", forType: .string)
+        var firstTriggered = false
+        let first = Task { @MainActor in
+            await PasteboardCopyEngine().capture(pasteboard: pasteboard, timeout: 1, inputRevision: { [] }) {
+                firstTriggered = true
+            }
+        }
+        while !firstTriggered { await Task.yield() }
+        let second = Task { @MainActor in
+            await PasteboardCopyEngine().capture(pasteboard: pasteboard, timeout: 1, inputRevision: { [] }) {
+                XCTAssertEqual(pasteboard.string(forType: .string), "Original")
+                pasteboard.clearContents()
+                pasteboard.setString("Second", forType: .string)
+            }
+        }
+        // Let the second capture reach its lock wait while the first transaction is open.
+        try await Task.sleep(nanoseconds: 10_000_000)
+        pasteboard.clearContents()
+        pasteboard.setString("First", forType: .string)
+        let firstResult = await first.value
+        let secondResult = await second.value
+        XCTAssertEqual(firstResult?.text, "First")
+        XCTAssertEqual(secondResult?.text, "Second")
+        XCTAssertEqual(pasteboard.string(forType: .string), "Original")
     }
 
     @MainActor

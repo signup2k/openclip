@@ -129,3 +129,18 @@ Extensions can expose user preferences rendered in the Preferences window under 
 - Non-secret option values are saved through [`SettingsStore`](../../Sources/Core/Settings/SettingsStore.swift) using typed setting key strings: `SettingKey<String>("action.<id>.option.<identifier>", defaultValue:)`.
 - `type: "secret"` option values live in `SecretStore` (`~/.openclip/secrets.json` with POSIX 0600 permissions), never `SettingsStore`/UserDefaults — resolved via [`SecretActionOptionStore`](../../Sources/OpenClip/Platform/Extensions/SecretActionOptionStore.swift).
 - Direct `UserDefaults.standard` access is discouraged and should not be added in new code. The JavaScript runtime reads options through the injected `ActionOptionReading` store (`OpenClipJSHost`), not `UserDefaults`.
+
+## Explicit JavaScript preview
+
+`openclip.preview(text)` appends an explicit preview result. It displays the native result card
+and never uses the General-tab text-delivery preference. Like other JS effects it takes precedence
+over an implicit string return, and it can occur within a sequence. With `"loading": true`, the
+spinner closes and the card reopens when the request finishes. This API requires a host build
+containing the preview bridge; extensions distributed to older builds should check
+`typeof openclip.preview === "function"` and show a configuration/update error if absent.
+
+Automatic paste delivery snapshots keyboard and mouse-down counters before the action runs.
+If there is intervening input or the source application is no longer active after the paste probe,
+the result is copied instead. This protects interactive edits and selection/window changes during
+network requests. It cannot detect a target app changing its selection programmatically without
+input, and the check is not an atomic transaction with the final synthetic paste event.

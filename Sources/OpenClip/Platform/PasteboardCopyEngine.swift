@@ -10,10 +10,20 @@ import Core
 /// Corrected pasteboard copy capture: archive → trigger → poll → restore.
 ///
 /// Drives the `.menuCopy` / `.keyboardCopy` retrieval modes via
-/// `SelectionRetrievalCoordinator.defaultCopyCapture`, so the real clipboard is never left in a
-/// copied state.
+/// `SelectionRetrievalCoordinator.defaultCopyCapture`, restoring only while no real input has intervened.
 @MainActor
 public struct PasteboardCopyEngine {
+    // MainActor alone does not serialize transactions across polling awaits.
+    private static var activePasteboards: Set<NSPasteboard.Name> = []
+
+    /// HID counters exclude our session-tap synthetic copy. Real input invalidates restoration:
+    /// in particular, a user copy must never be overwritten by an old clipboard snapshot.
+    nonisolated public static func hardwareInputRevision() -> [UInt32] {
+        [CGEventType.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel].map {
+            CGEventSource.counterForEventType(.hidSystemState, eventType: $0)
+        }
+    }
+
     public typealias CopyTrigger = @MainActor () -> Void
 
     /// Runs `trigger` between archiving the pasteboard and polling for a change.
@@ -23,7 +33,7 @@ public struct PasteboardCopyEngine {
     ///   - timeout: Maximum seconds to wait for the pasteboard changeCount to advance and yield text.
     ///     Defaults to a per-app profile: Safari gets a longer budget because its copy path is
     ///     observably slower to stabilize.
-    ///   - restoreDelay: Seconds to wait before restoring the archived original items on success.
+    ///   - restoreDelay: Retained for source compatibility; restoration is immediate.
     ///   - trigger: Performs the actual copy (AX menu press or keyboard event).
     /// - Returns: The copied text plus HTML/RTF when the source app wrote those representations,
     ///   or `nil` when the changeCount never advances or the copied text is empty.
@@ -31,11 +41,22 @@ public struct PasteboardCopyEngine {
         pasteboard: NSPasteboard = .general,
         timeout: TimeInterval? = nil,
         restoreDelay: TimeInterval = Constants.pasteboardRestoreDelay,
+        inputRevision: @MainActor () -> [UInt32] = PasteboardCopyEngine.hardwareInputRevision,
         trigger: CopyTrigger
     ) async -> TextResult? {
+        let input = inputRevision()
+        while Self.activePasteboards.contains(pasteboard.name) {
+            do { try await Task.sleep(nanoseconds: 2_000_000) } catch { return nil }
+            guard inputRevision() == input else { return nil }
+        }
+        guard !Task.isCancelled, inputRevision() == input else { return nil }
+        Self.activePasteboards.insert(pasteboard.name)
+        defer { Self.activePasteboards.remove(pasteboard.name) }
+
         let snapshot = PasteboardSnapshot.capture(pasteboard)
         let initialChangeCount = pasteboard.changeCount
 
+        guard !Task.isCancelled, inputRevision() == input else { return nil }
         trigger()
 
         let resolvedTimeout = timeout ?? Self.pollingTimeout()
@@ -44,11 +65,14 @@ public struct PasteboardCopyEngine {
         var result: TextResult?
 
         while Date() < deadline && !Task.isCancelled {
+            guard inputRevision() == input else { return nil }
             if pasteboard.changeCount != initialChangeCount {
+                let observedChangeCount = pasteboard.changeCount
                 if let candidate = pasteboard.string(forType: .string),
                    Self.hasSelection(candidate) {
                     let html = pasteboard.string(forType: .html) ?? Self.htmlFromRTF(pasteboard)
                     let rtf = pasteboard.string(forType: .rtf)
+                    guard pasteboard.changeCount == observedChangeCount else { continue }
                     result = TextResult(text: candidate, bounds: nil, html: html, rtf: rtf)
                     break
                 }
@@ -56,6 +80,8 @@ public struct PasteboardCopyEngine {
             try? await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
         }
 
+        // Check again after reading promised pasteboard data, which can involve target-app IPC.
+        guard inputRevision() == input else { return nil }
         guard let result else {
             if pasteboard.changeCount != initialChangeCount {
                 Log.selection.debug("Copy engine: no non-empty pasteboard text within deadline; restoring immediately")
@@ -65,7 +91,7 @@ public struct PasteboardCopyEngine {
         }
 
         snapshot.restore(to: pasteboard, transientMarkers: true)
-        return result
+        return Task.isCancelled ? nil : result
     }
 
     /// Per-app copy polling timeout. Browsers (Chromium, Safari, Firefox, Arc) need more time

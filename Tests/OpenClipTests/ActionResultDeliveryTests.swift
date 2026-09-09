@@ -15,7 +15,7 @@ final class ActionResultDeliveryTests: XCTestCase {
         switch (result, expected) {
         case (.paste(let a), .paste(let b)): XCTAssertEqual(a, b, message, file: file, line: line)
         case (.copy(let a), .copy(let b)): XCTAssertEqual(a, b, message, file: file, line: line)
-        case (.text(let a), .text(let b)): XCTAssertEqual(a, b, message, file: file, line: line)
+        case (.preview(let a), .preview(let b)), (.text(let a), .text(let b)): XCTAssertEqual(a, b, message, file: file, line: line)
         case (.cut(let a), .cut(let b)): XCTAssertEqual(a, b, message, file: file, line: line)
         case (.openURL(let a), .openURL(let b)): XCTAssertEqual(a, b, message, file: file, line: line)
         case (.success, .success), (.none, .none): XCTAssertTrue(true, message, file: file, line: line)
@@ -290,6 +290,49 @@ final class ActionResultDeliveryTests: XCTestCase {
         XCTAssertTrue(iTermPolicy.denyPaste)
     }
 
+    func testExplicitPreviewIgnoresEveryTextDeliveryPreference() {
+        for preference in ResultDeliveryPreference.allCases {
+            for click in [ActionResultDelivery.ClickIntent.primary, .secondary] {
+                let (result, toast) = ActionResultDelivery.resolve(raw: .preview("译文"), clickIntent: click, canPaste: true, delivery: .none, preference: preference)
+                assertCase(result, .preview("译文"))
+                XCTAssertNil(toast)
+                XCTAssertFalse(result.dismissesPopup)
+            }
+        }
+    }
+
+    @MainActor
+    func testExplicitPreviewShowsCardWithPastePreference() async throws {
+        let handler = RecordingHandler()
+        let store = MemorySettingsStore()
+        store.set(.primaryClickBehavior, value: "paste")
+        let controller = shownController(resultHandler: handler, pasteProbe: FixedProbe(result: true), appPolicy: .default, settingsStore: store)
+        defer { controller.hide() }
+        controller.deliverResult(.preview("译文"))
+        let deadline = Date().addingTimeInterval(3)
+        while controller.modeStore.mode != .content && Date() < deadline {
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        XCTAssertTrue(handler.results.isEmpty)
+        XCTAssertTrue(controller.isVisible)
+        XCTAssertEqual(controller.modeStore.mode, .content)
+    }
+
+    @MainActor
+    func testAsyncPasteDowngradesAfterKeyboardOrMouseInteraction() async throws {
+        for index in 0..<4 {
+            let handler = RecordingHandler()
+            let controller = shownController(resultHandler: handler, pasteProbe: FixedProbe(result: true), appPolicy: .default)
+            controller.frontmostApplicationProvider = { nil }
+            let snapshot = controller.deliverySnapshot()
+            var changed = [UInt32](repeating: 0, count: 4)
+            changed[index] = 1
+            controller.pasteInteractionStampProvider = { changed }
+            controller.deliverResult(.paste("translated"), delivery: snapshot)
+            assertCase(try await awaitDelivery(from: handler), .copy("translated"))
+        }
+    }
+
     // MARK: - Controller wiring: the delivery inputs must be snapshotted before hide() clears them
 
     @MainActor
@@ -338,6 +381,7 @@ final class ActionResultDeliveryTests: XCTestCase {
             appPolicy: appPolicy
         )
         controller.startTestSession(for: context)
+        controller.pasteInteractionStampProvider = { [0, 0, 0, 0] }
         return controller
     }
 

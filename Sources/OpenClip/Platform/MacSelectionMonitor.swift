@@ -21,6 +21,7 @@ internal final class MacSelectionMonitor: SelectionMonitoring {
     private var mouseDownMonitor: Any?
     private var mouseDragMonitor: Any?
     internal var mouseHoldTask: Task<Void, Never>?
+    private var retryAfterHold: (() -> Void)?
     private var mouseDownLocation: CGPoint?
     internal var triggeredByHold: Bool = false
     private let settingsStore: SettingsStore
@@ -107,14 +108,15 @@ internal final class MacSelectionMonitor: SelectionMonitoring {
         // retrieval path as a mouse drag, so keyboard-only selections surface the popup too.
         keyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             MainActor.assumeIsolated {
-                guard Self.isSelectionTrigger(keyCode: event.keyCode, flags: event.modifierFlags) else { return }
-                let isSelectAll = Self.isSelectAllKey(keyCode: event.keyCode, flags: event.modifierFlags)
-                self?.handleSelectionTrigger(isSelectAll: isSelectAll)
+                self?.handleKeyDown(event)
             }
         }
     }
     
     internal func stop() {
+        retryAfterHold = nil
+        triggeredByHold = false
+        mouseDownLocation = nil
         debounceTask?.cancel()
         debounceTask = nil
         mouseHoldTask?.cancel()
@@ -170,10 +172,27 @@ internal final class MacSelectionMonitor: SelectionMonitoring {
     
     // MARK: - Event handling
 
-    internal func handleMouseDown(at point: CGPoint) {
-        mouseDownLocation = point
-        triggeredByHold = false
+    internal func handleKeyDown(_ event: NSEvent) {
+        guard event.cgEvent?.getIntegerValueField(.eventSourceUserData) != SessionEventTapPoster.syntheticEventTag else { return }
+        guard Self.isSelectionTrigger(keyCode: event.keyCode, flags: event.modifierFlags) else {
+            cancelPendingRetrieval()
+            return
+        }
+        handleSelectionTrigger(isSelectAll: Self.isSelectAllKey(keyCode: event.keyCode, flags: event.modifierFlags))
+    }
+
+    internal func cancelPendingRetrieval() {
+        debounceTask?.cancel()
+        debounceTask = nil
         mouseHoldTask?.cancel()
+        mouseHoldTask = nil
+        retryAfterHold = nil
+        triggeredByHold = false
+    }
+
+    internal func handleMouseDown(at point: CGPoint) {
+        cancelPendingRetrieval()
+        mouseDownLocation = point
 
         guard settingsStore.get(.pauseUntilTimestamp) <= Date().timeIntervalSince1970 else { return }
         guard settingsStore.get(.isMouseHoldEnabled) else { return }
@@ -214,8 +233,18 @@ internal final class MacSelectionMonitor: SelectionMonitoring {
             // path: clear the trigger so mouse-up falls through to the ordinary drag/click
             // selection flow ("press, pause a beat, then drag-select" depends on this).
             var delivered = false
-            defer { if !delivered { self.triggeredByHold = false } }
+            defer {
+                if !Task.isCancelled {
+                    let retry = self.retryAfterHold
+                    self.retryAfterHold = nil
+                    if !delivered {
+                        self.triggeredByHold = false
+                        retry?()
+                    }
+                }
+            }
 
+            let downPoint = self.mouseDownLocation
             let policy = self.policyResolver(app.bundleIdentifier)
             if policy.disabled || policy.hotkeyOnly {
                 return
@@ -261,7 +290,7 @@ internal final class MacSelectionMonitor: SelectionMonitoring {
                 text: retrievedText,
                 sourceApp: appIdentity,
                 cursorPosition: currentPoint,
-                mouseDownLocation: self.mouseDownLocation,
+                mouseDownLocation: downPoint,
                 selectionBounds: selectionBounds,
                 timestamp: Date(),
                 appPolicy: policy,
@@ -270,6 +299,7 @@ internal final class MacSelectionMonitor: SelectionMonitoring {
                 rtf: selectionRTF
             )
             guard !Task.isCancelled else { return }
+            guard self.frontmostAppProvider()?.processIdentifier == app.processIdentifier else { return }
             delivered = true
             self.onSelection?(context, canPaste)
         }
@@ -280,13 +310,9 @@ internal final class MacSelectionMonitor: SelectionMonitoring {
         let dx = point.x - downPoint.x
         let dy = point.y - downPoint.y
         if (dx * dx + dy * dy) > Self.holdDragDisarmSquared {
-            // A drag is now the gesture in progress: disarm an unfired timer, and clear the hold
-            // flag so a fired-but-unproductive hold cannot suppress this press's legitimate
-            // selection delivery on release. A fired task that is mid-delivery keeps running —
-            // cancelling it here would kill the popup for normal-speed press-drag gestures.
-            if !triggeredByHold {
-                mouseHoldTask?.cancel()
-            }
+            // A new drag invalidates any in-flight hold read, including its eventual callbacks.
+            mouseHoldTask?.cancel()
+            retryAfterHold = nil
             mouseHoldTask = nil
             triggeredByHold = false
         }
@@ -304,18 +330,27 @@ internal final class MacSelectionMonitor: SelectionMonitoring {
         mouseDownLocation = nil
 
         // If hold-to-popup delivered (or is delivering) this press's popup, don't duplicate on release.
-        guard !wasHold else { return }
+        guard !wasHold else {
+            retryAfterHold = { [weak self] in
+                self?.retrieveMouseSelection(app: app, cursor: cursor, clickCount: clickCount, downPoint: downPoint)
+            }
+            return
+        }
 
         // The hold never fired: ordinary click/drag press cycle — stop the pending timer.
         mouseHoldTask?.cancel()
         mouseHoldTask = nil
 
-        debounceTask?.cancel()
+        retrieveMouseSelection(app: app, cursor: cursor, clickCount: clickCount, downPoint: downPoint)
+    }
 
+    private func retrieveMouseSelection(app: NSRunningApplication, cursor: CGPoint, clickCount: Int, downPoint: CGPoint?) {
+        debounceTask?.cancel()
         guard settingsStore.get(.pauseUntilTimestamp) <= Date().timeIntervalSince1970 else { return }
 
         debounceTask = Task { @MainActor in
-            if let bundleID = app.bundleIdentifier, AppFilter.isExcluded(bundleID: bundleID) {
+            guard frontmostAppProvider()?.processIdentifier == app.processIdentifier else { return }
+            if isExcludedBundle(app.bundleIdentifier) {
                 return
             }
             
@@ -339,7 +374,7 @@ internal final class MacSelectionMonitor: SelectionMonitoring {
             let result = await retriever.retrieve(
                 for: appIdentity,
                 policy: policy,
-                cursor: CursorClassifier.current
+                cursor: currentCursorProvider()
             )
             if Task.isCancelled { return }
             await self.deliverSelection(
@@ -353,12 +388,12 @@ internal final class MacSelectionMonitor: SelectionMonitoring {
         }
     }
     
-    /// Keyboard selection gesture: retrieve under the frontmost app resolved *after* the debounce
-    /// (a ⌘A/⇧+arrow in one app followed by a switch during the debounce window must target the
-    /// now-frontmost app). `isSelectAll` marks a ⌘A select-all, which copy-based retrieval modes
+    /// Keyboard selection gesture: keep the source app captured at key-down; switching apps
+    /// during debounce invalidates the request. `isSelectAll` marks a ⌘A select-all, which copy-based retrieval modes
     /// reject unless the focused element is text-bearing (row selection in Finder/Mail/table views).
     internal func handleSelectionTrigger(isSelectAll: Bool) {
-        debounceTask?.cancel()
+        cancelPendingRetrieval()
+        let sourceApp = frontmostAppProvider()
         guard settingsStore.get(.pauseUntilTimestamp) <= Date().timeIntervalSince1970 else { return }
         debounceTask = Task { @MainActor in
             do {
@@ -368,9 +403,9 @@ internal final class MacSelectionMonitor: SelectionMonitoring {
             }
             if Task.isCancelled { return }
 
-            guard let app = NSWorkspace.shared.frontmostApplication else { return }
-
-            if let bundleID = app.bundleIdentifier, AppFilter.isExcluded(bundleID: bundleID) {
+            guard let app = sourceApp,
+                  frontmostAppProvider()?.processIdentifier == app.processIdentifier else { return }
+            if isExcludedBundle(app.bundleIdentifier) {
                 return
             }
             
@@ -383,7 +418,7 @@ internal final class MacSelectionMonitor: SelectionMonitoring {
             let result = await retriever.retrieve(
                 for: appIdentity,
                 policy: policy,
-                cursor: CursorClassifier.current,
+                cursor: .unknown,
                 isSelectAll: isSelectAll
             )
             if Task.isCancelled { return }
@@ -455,7 +490,8 @@ internal final class MacSelectionMonitor: SelectionMonitoring {
             rtf: result.rtf
         )
         let canPaste = await probeTask?.value
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled,
+              frontmostAppProvider().map(AppIdentity.init) == appIdentity else { return }
         self.onSelection?(context, canPaste)
     }
 }

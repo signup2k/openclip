@@ -426,5 +426,6 @@
   "Pause in %@": "Mettre en pause dans %@",
   "Paused in %@": "En pause dans %@",
   "Pause in App": "Mettre en pause dans l'application",
-  "Resume OpenClip (%lldm left)": "Reprendre OpenClip (%lld min restantes)"
+  "Resume OpenClip (%lldm left)": "Reprendre OpenClip (%lld min restantes)",
+  "Personal build. Install updates manually.": "Version personnelle. Installez les mises à jour manuellement."
 }
