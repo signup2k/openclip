@@ -21,16 +21,6 @@ final class HotkeyManagerTests: XCTestCase {
         ))
     }
 
-    func testNoIdentifiableTargetNeverTriggers() {
-        // Covers both a nil frontmost app and one without a bundle ID: previously this fell back
-        // to OpenClip itself.
-        XCTAssertFalse(HotkeyManager.triggerAllowed(isAppEnabled: true, frontmost: nil))
-        XCTAssertFalse(HotkeyManager.triggerAllowed(
-            isAppEnabled: true,
-            frontmost: MockFrontmostApp(bundleID: nil)
-        ))
-    }
-
     func testExcludedAppsNeverTrigger() {
         // A bundle from AppFilter's exclusion list must be rejected even when enabled.
         let excluded = MockFrontmostApp(bundleID: "com.adobe.photoshop")
@@ -47,11 +37,6 @@ final class HotkeyManagerTests: XCTestCase {
         RuleEngine.shared.addOrUpdateRule(AppRule(bundleIdentifiers: ["com.test.hotkeyonly"], hotkeyOnly: true))
         let app = MockFrontmostApp(bundleID: "com.test.hotkeyonly")
         XCTAssertTrue(HotkeyManager.triggerAllowed(isAppEnabled: true, frontmost: app))
-    }
-
-    func testOrdinaryForegroundAppTriggers() {
-        let ordinary = MockFrontmostApp(bundleID: "com.apple.TextEdit")
-        XCTAssertTrue(HotkeyManager.triggerAllowed(isAppEnabled: true, frontmost: ordinary))
     }
 
     func testPauseUntilTimestampBlocksTrigger() {

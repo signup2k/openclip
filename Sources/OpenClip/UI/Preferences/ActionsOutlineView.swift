@@ -300,8 +300,6 @@ final class ActionsOutlineCoordinator: NSObject, NSOutlineViewDataSource, NSOutl
         var seenPackages = Set<String>()
 
         for action in actions {
-            if ActionIdentity.isAIPreset(action) { continue }
-
             // Custom Group parent
             if let def = groupDefs.first(where: { $0.id == action.id }) {
                 seenCustomGroups.insert(def.id)

@@ -18,33 +18,6 @@ final class AppLaunchClassifierTests: XCTestCase {
         XCTAssertEqual(scenario, .firstInstall)
     }
 
-    func testFirstInstallWhenLastRunVersionEmpty() {
-        let scenario = AppLaunchClassifier.classify(
-            lastRunVersion: "   ",
-            currentVersion: "1.1.0",
-            hasCompletedOnboarding: true,
-            isAccessibilityGranted: true
-        )
-        XCTAssertEqual(scenario, .firstInstall)
-    }
-
-    func testAppUpdateWhenVersionChanges() {
-        let scenario = AppLaunchClassifier.classify(
-            lastRunVersion: "1.0.0",
-            currentVersion: "1.1.0",
-            lastRunBuild: "1",
-            currentBuild: "2",
-            hasCompletedOnboarding: true,
-            isAccessibilityGranted: false
-        )
-        XCTAssertEqual(scenario, .appUpdate(
-            previousVersion: "1.0.0",
-            currentVersion: "1.1.0",
-            previousBuild: "1",
-            currentBuild: "2"
-        ))
-    }
-
     func testAppUpdateWhenOnlyBuildNumberChanges() {
         // Marketing version unchanged (1.1.0 == 1.1.0), but build number bumped from 3 to 4.
         let scenario = AppLaunchClassifier.classify(

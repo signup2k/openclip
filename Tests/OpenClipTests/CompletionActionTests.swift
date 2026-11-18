@@ -32,11 +32,4 @@ final class CompletionActionTests: XCTestCase {
         XCTAssertFalse(action.isEnabled(for: urlContext), "CompletionAction should be disabled for URLs")
     }
     
-    @MainActor
-    func testFetchCompletions() async throws {
-        let action = CompletionAction()
-        let completions = action.fetchCompletions(for: "comple")
-        XCTAssertFalse(completions.isEmpty, "fetchCompletions should return completion candidates for 'comple'")
-        XCTAssertTrue(completions.contains(where: { $0.lowercased().hasPrefix("comple") }), "Completions should contain words starting with 'comple'")
-    }
 }

@@ -14,9 +14,8 @@ import SDWebImageSVGCoder
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var statusBarController: StatusBarController?
-    private var selectionMonitor: (any SelectionMonitoring)?
+    private var selectionMonitor: MacSelectionMonitor?
     private var popupController: PopupWindowController?
-    private var aiActionSync: AIActionSync?
     private var extensionsWatcher: ExtensionsDirectoryWatcher?
 
     private var onboardingWindowController: OnboardingWindowController?
@@ -70,6 +69,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         // temporarily switch us to .regular. Calling this here ensures we stay
         // invisible in the Dock and App Switcher at all times.
         NSApp.setActivationPolicy(.accessory)
+
+        // Selections and hotkeys can open the popup while the extension scan is still running.
+        _ = AIActionSync.shared
         
         // Initialize the status bar controller
         statusBarController = StatusBarController()
@@ -92,8 +94,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             ActionCoordinator.shared.register(action: OpenURLAction())
             ActionCoordinator.shared.register(action: RevealInFinderAction())
             ActionCoordinator.shared.register(action: CompletionAction())
-            // Register each AI preset as an individual action (palette + Preferences → Actions).
-            aiActionSync = AIActionSync.shared
 
             // Watch ~/.openclip/extensions and reload on changes so extensions installed or
             // edited outside the app (store installs, install_extension.sh, manifest edits)

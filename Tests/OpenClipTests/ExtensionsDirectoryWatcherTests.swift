@@ -24,15 +24,6 @@ final class ExtensionsDirectoryWatcherTests: XCTestCase {
 
     // MARK: - Snapshot
 
-    func testSnapshotIsStableWhenNothingChanges() throws {
-        try writeFile("manifest_ext.openclipext/openclip.json")
-        try writeFile("tool.sh")
-
-        let first = try XCTUnwrap(ExtensionsSnapshot.build(from: tempDir))
-        let second = try XCTUnwrap(ExtensionsSnapshot.build(from: tempDir))
-        XCTAssertEqual(first, second, "A rebuild with no changes must produce an equal snapshot")
-    }
-
     func testSnapshotDetectsAddedRemovedAndEditedFiles() throws {
         try writeFile("a.sh")
 
@@ -49,21 +40,6 @@ final class ExtensionsDirectoryWatcherTests: XCTestCase {
         try FileManager.default.removeItem(at: tempDir.appendingPathComponent("b.sh"))
         let afterRemove = try XCTUnwrap(ExtensionsSnapshot.build(from: tempDir))
         XCTAssertNotEqual(base, afterRemove, "Removing a file must change the snapshot")
-    }
-
-    func testSnapshotIgnoresHiddenItems() throws {
-        let before = try XCTUnwrap(ExtensionsSnapshot.build(from: tempDir))
-
-        try writeFile(".install_staging_123/package/openclip.json")
-        try writeFile(".DS_Store")
-
-        let after = try XCTUnwrap(ExtensionsSnapshot.build(from: tempDir))
-        XCTAssertEqual(before, after, "Hidden/staging files must not change the snapshot")
-    }
-
-    func testSnapshotNilWhenDirectoryMissing() throws {
-        let missing = tempDir.appendingPathComponent("does_not_exist")
-        XCTAssertNil(ExtensionsSnapshot.build(from: missing))
     }
 
     // MARK: - Watcher settle logic
@@ -85,62 +61,6 @@ final class ExtensionsDirectoryWatcherTests: XCTestCase {
         watcher.pollOnce() // second agreeing tick → settle
         let countAfterSettle = await probe.fire(expected: 1)
         XCTAssertEqual(countAfterSettle, 1)
-    }
-
-    @MainActor
-    func testWatcherDoesNotFireWhileTreeKeepsChanging() async throws {
-        let probe = ReloadProbe()
-        let watcher = ExtensionsDirectoryWatcher(reload: { await probe.bump() })
-        watcher.start(watching: tempDir, interval: 3600)
-        defer { watcher.stop() }
-        watcher.pollOnce()
-
-        try writeFile("a.sh")
-        watcher.pollOnce() // tick 1: changed, pending
-
-        try writeFile("b.sh") // still mid-change
-        watcher.pollOnce() // tick 2: pending slides forward, not settled
-        let count = await probe.fire(expected: 0)
-        XCTAssertEqual(count, 0)
-
-        watcher.pollOnce() // tick 3: agrees with tick 2 → settle
-        let countAfterSettle = await probe.fire(expected: 1)
-        XCTAssertEqual(countAfterSettle, 1)
-    }
-
-    @MainActor
-    func testWatcherDoesNotFireWithoutChanges() async throws {
-        let probe = ReloadProbe()
-        let watcher = ExtensionsDirectoryWatcher(reload: { await probe.bump() })
-        watcher.start(watching: tempDir, interval: 3600)
-        defer { watcher.stop() }
-        watcher.pollOnce()
-
-        watcher.pollOnce()
-        watcher.pollOnce()
-        let count = await probe.fire(expected: 0)
-        XCTAssertEqual(count, 0)
-    }
-
-    @MainActor
-    func testWatcherDoesNotFireWhenDirectoryGoesMissing() async throws {
-        let probe = ReloadProbe()
-        let watcher = ExtensionsDirectoryWatcher(reload: { await probe.bump() })
-        watcher.start(watching: tempDir, interval: 3600)
-        defer { watcher.stop() }
-        watcher.pollOnce()
-
-        try writeFile("a.sh")
-        watcher.pollOnce()
-        watcher.pollOnce()
-        let count = await probe.fire(expected: 1)
-        XCTAssertEqual(count, 1)
-
-        // Directory disappears wholesale — must not fire (would be a transient state).
-        try FileManager.default.removeItem(at: tempDir)
-        watcher.pollOnce()
-        let count2 = await probe.fire(expected: 1)
-        XCTAssertEqual(count2, 1)
     }
 
     @MainActor

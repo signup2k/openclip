@@ -1,9 +1,9 @@
 // SubBarPanelController.swift
 // OpenClip
 //
-// Manages the standalone SubBarPanel hosting GroupSubActionBarView for group actions and AI tools.
+// Manages the standalone SubBarPanel hosting GroupSubActionBarView.
 // Positions the sub-bar in screen coordinates relative to the parent button frame, handles
-// dwell/grace timers, pinning state, and forwards action execution to the root result handler.
+// dwell and grace timers, and forwards action execution to the root result handler.
 import AppKit
 import SwiftUI
 import Core
@@ -16,7 +16,6 @@ public final class SubBarPanelController {
     private var dwellTask: Task<Void, Never>?
     public private(set) var activeState: ActiveSubGroupState?
     public var isShowing: Bool { panel.isVisible }
-    public var isPinned: Bool { activeState?.isPinned == true }
     public var panelFrame: NSRect { panel.frame }
     /// Called when the sub-bar hides so parent state (like active button highlight) is dismissed immediately.
     public var onDismiss: (@MainActor @Sendable () -> Void)?
@@ -32,9 +31,9 @@ public final class SubBarPanelController {
         subActions: [any Action],
         parentButtonScreenFrame: NSRect,
         mainBarScreenFrame: NSRect? = nil,
-        isPinned: Bool,
         searchResultsAbove: Bool = true,
         mainBarAbove: Bool? = nil,
+        radialMenu: Bool = false,
         effectiveTheme: String,
         effectiveColorScheme: ColorScheme,
         scale: CGFloat,
@@ -56,14 +55,11 @@ public final class SubBarPanelController {
             return false
         }
 
-        let state = ActiveSubGroupState(
+        activeState = ActiveSubGroupState(
             groupID: groupAction.id,
             parentIndex: parentIndex,
-            subActionIDs: subActions.map(\.id),
-            isPinned: isPinned,
             parentButtonFrame: parentButtonScreenFrame
         )
-        self.activeState = state
         panel.horizontalAnchor = .none
 
         let contentView = SubBarContentView(
@@ -131,44 +127,15 @@ public final class SubBarPanelController {
         let maxX = max(minX, screenBounds.maxX - panelWidth - PopupMetrics.popupPadding)
         let clampedX = max(minX, min(panelX, maxX))
 
-        // Vertical positioning: 6pt visual gap from the main bar's button
-        // Prefers opening in the same direction as the main bar (away from selected text),
-        // but flips if constrained by the screen boundaries.
-        let preferAbove = mainBarAbove ?? searchResultsAbove
-        let yAbove = parentButtonScreenFrame.maxY + 6 - shadowInset
-        let yBelow = parentButtonScreenFrame.minY - 6 + shadowInset - panelHeight
-        let padding = PopupMetrics.popupPadding
+        let radialBounds = radialMenu ? mainBarScreenFrame?.insetBy(dx: shadowInset, dy: shadowInset) : nil
+        let preferAbove = radialBounds.map { parentButtonScreenFrame.midY >= $0.midY }
+            ?? mainBarAbove ?? searchResultsAbove
+        let vertical = PopupPositioner.subBarY(anchor: radialBounds ?? parentButtonScreenFrame,
+                                               height: panelHeight, preferAbove: preferAbove, screenBounds: screenBounds)
 
-        let panelY: CGFloat
-        if preferAbove {
-            if yAbove + panelHeight <= screenBounds.maxY - padding {
-                panelY = yAbove
-            } else if yBelow >= screenBounds.minY + padding {
-                panelY = yBelow
-            } else {
-                panelY = yAbove
-            }
-        } else {
-            if yBelow >= screenBounds.minY + padding {
-                panelY = yBelow
-            } else if yAbove + panelHeight <= screenBounds.maxY - padding {
-                panelY = yAbove
-            } else {
-                panelY = yBelow
-            }
-        }
-
-        panel.setFrame(NSRect(x: clampedX, y: panelY, width: panelWidth, height: panelHeight), display: true)
+        panel.setFrame(NSRect(x: clampedX, y: vertical.y, width: panelWidth, height: panelHeight), display: true)
         panel.orderFront(nil)
-        return panelY == yAbove
-    }
-
-    /// Pin the current active sub-bar so it stays open until explicitly closed or an action runs.
-    public func pin() {
-        if let current = activeState {
-            activeState = current.pinned()
-            cancelGrace()
-        }
+        return vertical.above
     }
 
     /// Whether an action index on the main bar is an immediate neighbor of the active parent action (within 1 position).
@@ -200,15 +167,15 @@ public final class SubBarPanelController {
     public func cancelDwell(startGrace: Bool = true) {
         dwellTask?.cancel()
         dwellTask = nil
-        if startGrace && !isPinned && isShowing {
+        if startGrace {
             self.startGrace()
         }
     }
 
     public func startGrace() {
-        guard !isPinned, isShowing else { return }
+        guard isShowing else { return }
         let mouseLoc = NSEvent.mouseLocation
-        if panel.isVisible && panel.frame.insetBy(dx: -4, dy: -4).contains(mouseLoc) {
+        if panel.frame.insetBy(dx: -4, dy: -4).contains(mouseLoc) {
             cancelGrace()
             return
         }

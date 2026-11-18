@@ -27,36 +27,15 @@ final class ActionsOutlineRefreshTests: XCTestCase {
         ))
     }
 
-    func testSelectionAndToggleChangesPreserveExistingNodes() throws {
+    func testAIPresetsAreEditableTopLevelRows() {
         let coordinator = makeCoordinator()
-        XCTAssertTrue(coordinator.rebuildTree())
-        let node = try XCTUnwrap(coordinator.rootNodes.first)
-        coordinator.parent = ActionsOutlineView(
-            coordinator: coordinator.parent.coordinator,
-            customizationManager: coordinator.parent.customizationManager,
-            selectedRowIDs: .constant([node.id]),
-            disabledActionIDs: .constant([node.id]),
-            disabledPackages: .constant([]),
-            onEditGroup: { _ in }, onCreateGroupFromSelection: {}
-        )
-        XCTAssertFalse(coordinator.rebuildTree(), "Navigation/toggle changes must not reload the outline")
-        XCTAssertTrue(coordinator.rootNodes.first === node)
-    }
-
-    func testLiveAppearanceChangeInvalidatesCachedPresentation() {
-        let coordinator = makeCoordinator()
-        XCTAssertTrue(coordinator.rebuildTree())
-        coordinator.parent.customizationManager.setOverride(for: "builtin.copy", title: "My Copy", symbol: "heart", text: nil)
-        XCTAssertTrue(coordinator.rebuildTree(), "Compare against the previous render, not today's store twice")
-        XCTAssertFalse(coordinator.rebuildTree())
-    }
-
-    func testRegistryChangesRebuildTheTree() {
-        let coordinator = makeCoordinator()
+        coordinator.parent.coordinator.register(action: AIToolsAction())
+        coordinator.parent.coordinator.register(action: AIAction(presetID: "explain", title: "Explain"))
+        coordinator.parent.coordinator.register(action: AIAction(presetID: "summarize", title: "Summarize"))
         coordinator.rebuildTree()
-        coordinator.parent.coordinator.unregister(actionID: "builtin.copy")
-        XCTAssertTrue(coordinator.rebuildTree())
-        XCTAssertFalse(coordinator.rootNodes.contains { $0.id == "builtin.copy" })
+        let presets = coordinator.rootNodes.filter { $0.action.map(ActionIdentity.isAIPreset) == true }
+        XCTAssertEqual(presets.map(\.id), ["ai.preset.explain", "ai.preset.summarize"])
+        XCTAssertTrue(presets.allSatisfy { $0.children.isEmpty })
     }
 
     func testSameIDActionReplacementRefreshesDataWithoutReplacingNode() throws {

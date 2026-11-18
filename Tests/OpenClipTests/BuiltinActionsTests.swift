@@ -3,30 +3,15 @@ import XCTest
 @testable import OpenClip
 
 final class BuiltinActionsTests: XCTestCase {
-    
+
     override func setUp() async throws {
         try await super.setUp()
         await TestIsolation.reset()
     }
-    
+
     func createMockContext(with text: String) -> ActionContext {
         let selection = SelectionContext(text: text, sourceApp: AppIdentity(bundleIdentifier: "com.test", localizedName: "Test"), cursorPosition: .zero, timestamp: Date(), appPolicy: .default)
         return ActionContext(selection: selection, modifiers: [])
-    }
-    
-    @MainActor
-    func testCopyAction() async throws {
-        let action = CopyAction()
-        let context = createMockContext(with: "test string")
-        
-        XCTAssertTrue(action.isEnabled(for: context))
-        
-        let result = try await action.perform(context)
-        if case .copy(let text) = result {
-            XCTAssertEqual(text, "test string")
-        } else {
-            XCTFail("Expected .copy result")
-        }
     }
 
     @MainActor
@@ -51,36 +36,20 @@ final class BuiltinActionsTests: XCTestCase {
             XCTFail("Expected .copyContent result when HTML/RTF present")
         }
     }
-    
+
     @MainActor
     func testPasteAction() async throws {
         let action = PasteAction()
         let context = createMockContext(with: "test string")
-        
+
         XCTAssertTrue(action.isEnabled(for: context))
-        
+
         // We just test perform logic here.
         let result = try await action.perform(context)
         if case .simulatePaste = result {
             // Success
         } else {
             XCTFail("Expected .simulatePaste result")
-        }
-    }
-    
-    @MainActor
-    func testSearchAction() async throws {
-        let store = MemorySettingsStore()
-        let action = SearchAction(settingsStore: store)
-        let context = createMockContext(with: "test search")
-
-        XCTAssertTrue(action.isEnabled(for: context))
-
-        let result = try await action.perform(context)
-        if case .openURL(let url) = result {
-            XCTAssertEqual(url.absoluteString, "https://www.google.com/search?q=test%20search")
-        } else {
-            XCTFail("Expected .openURL result")
         }
     }
 
@@ -127,22 +96,22 @@ final class BuiltinActionsTests: XCTestCase {
             XCTFail("Expected .openURL result with option taking precedence")
         }
     }
-    
+
     @MainActor
     func testOpenURLAction() async throws {
         let action = OpenURLAction()
-        
+
         // Test valid URL
         let validContext = createMockContext(with: "https://apple.com")
         XCTAssertTrue(action.isEnabled(for: validContext))
-        
+
         let validResult = try await action.perform(validContext)
         if case .openURL(let url) = validResult {
             XCTAssertEqual(url.absoluteString, "https://apple.com")
         } else {
             XCTFail("Expected .openURL result for valid URL")
         }
-        
+
         // Test URL embedded in surrounding text
         let embeddedContext = createMockContext(with: "Check out https://github.com/apple/swift in this PR!")
         XCTAssertTrue(action.isEnabled(for: embeddedContext))
@@ -192,11 +161,11 @@ final class BuiltinActionsTests: XCTestCase {
         } else {
             XCTFail("Expected .openURL for wrapped web link")
         }
-        
+
         // Test non-web schemes are rejected (mailto, ftp, magnet, custom deep links)
         let mailContext = createMockContext(with: "Send to mailto:user@example.com")
         XCTAssertFalse(action.isEnabled(for: mailContext), "mailto: scheme must not enable Open Link")
-        
+
         let ftpContext = createMockContext(with: "ftp://files.example.com/archive.zip")
         XCTAssertFalse(action.isEnabled(for: ftpContext), "ftp: scheme must not enable Open Link")
 
@@ -209,7 +178,7 @@ final class BuiltinActionsTests: XCTestCase {
         // Test invalid URL
         let invalidContext = createMockContext(with: "No URL here")
         XCTAssertFalse(action.isEnabled(for: invalidContext))
-        
+
         let invalidResult = try await action.perform(invalidContext)
         if case .failure(_) = invalidResult {
             // Success
@@ -217,19 +186,64 @@ final class BuiltinActionsTests: XCTestCase {
             XCTFail("Expected .failure result for invalid URL")
         }
     }
-    
+
     @MainActor
     func testCutAction() async throws {
         let action = CutAction()
         let context = createMockContext(with: "test cut")
-        
+
         XCTAssertTrue(action.isEnabled(for: context))
-        
+
         let result = try await action.perform(context)
         if case .cut(let text) = result {
             XCTAssertEqual(text, "test cut")
         } else {
             XCTFail("Expected .cut result")
         }
+    }
+
+    func testPresetMatchingPreservesCustomSearchURL() {
+        XCTAssertNil(SearchEnginePreset.preset(matching: "https://www.google.com/search?q={query}&hl=en"))
+    }
+
+
+    @MainActor
+    func testOpenURLActionContextualFiltering() {
+        let action = OpenURLAction()
+
+        let validContext = createMockContext(with: "https://apple.com")
+        XCTAssertTrue(action.isEnabled(for: validContext))
+
+        let plainTextContext = createMockContext(with: "hello world")
+        XCTAssertFalse(action.isEnabled(for: plainTextContext))
+
+        let paddedContext = createMockContext(with: "  https://apple.com  ")
+        XCTAssertTrue(action.isEnabled(for: paddedContext))
+
+        let embeddedContext = createMockContext(with: "Visit https://apple.com for more info")
+        XCTAssertTrue(action.isEnabled(for: embeddedContext))
+
+        let bareDomainContext = createMockContext(with: "github.com/torvalds/linux")
+        XCTAssertTrue(action.isEnabled(for: bareDomainContext))
+
+        let localhostContext = createMockContext(with: "localhost:3000")
+        XCTAssertTrue(action.isEnabled(for: localhostContext))
+    }
+
+    @MainActor
+    func testSearchActionContextualFiltering() {
+        let action = SearchAction()
+
+        let urlContext = createMockContext(with: "https://google.com")
+        XCTAssertTrue(action.isEnabled(for: urlContext))
+
+        let plainTextContext = createMockContext(with: "macOS swift development")
+        XCTAssertTrue(action.isEnabled(for: plainTextContext))
+
+        let paddedUrlContext = createMockContext(with: "  https://google.com  ")
+        XCTAssertTrue(action.isEnabled(for: paddedUrlContext))
+
+        let emptyContext = createMockContext(with: "   ")
+        XCTAssertFalse(action.isEnabled(for: emptyContext))
     }
 }

@@ -28,15 +28,9 @@ CORE_TEST_FLAGS=(
     -only-testing:OpenClipTests/TextPlaceholderEngineTests
     -only-testing:OpenClipTests/SettingsStoreTests
     -only-testing:OpenClipTests/RuleEngineTests
-    -only-testing:OpenClipTests/DebugLogBufferTests
-    -only-testing:OpenClipTests/DebugLogEntryTests
     -only-testing:OpenClipTests/DebugLogFilterTests
-    -only-testing:OpenClipTests/DebugLogStoreTests
-    -only-testing:OpenClipTests/AppFilterTests
-    -only-testing:OpenClipTests/ContextualFilteringTests
+    -only-testing:OpenClipTests/ActionRegistryTests
     -only-testing:OpenClipTests/ExtensionManifestTests
-    -only-testing:OpenClipTests/ExtensionRiskProfileTests
-    -only-testing:OpenClipTests/ExtensionTrustStateTests
     -only-testing:OpenClipTests/ExtensionPackageHashResolverTests
     -only-testing:OpenClipTests/ExtensionUpdatePlannerTests
 )

@@ -4,6 +4,40 @@ The floating popup panel subsystem presents contextual actions near the user's c
 
 ---
 
+## Menu Layouts
+
+Appearance → Menu Layout switches between the existing **Horizontal** bar and a **Radial**
+menu. `SettingKey.popupLayout` persists through `SettingsStore`, defaults to `horizontal`, and
+unknown values resolve to that default. The static Preferences preview subscribes to the same
+setting. Horizontal position, vertical position, and width controls apply only to the bar.
+
+The radial menu has a 144pt visible diameter at normal scale (previously 200pt). Symbols render
+without a second label; the central search button shows the hovered action's full title. The menu
+opens around the mouse-release point, clamped by translation to the display's visible frame;
+sectors never rotate or flip at an edge. The controller fixes its size/frame before the first
+hosting-view layout and captures that session's screen bounds. Exact display containment takes
+precedence over the 2pt boundary tolerance, avoiding wrong-display placement at shared edges.
+Up to eight actions appear clockwise from twelve o'clock; additional actions use pages without
+changing the disk's size or position. `PopupRadialLayout` owns pagination and annular hit-testing;
+`PopupRadialSector` draws the same sectors and supplies their SwiftUI click shapes. The whole sector
+is clickable, rather than only its icon. Word completions use the same radial layout when available.
+The compact central hub combines the hovered action title with search, completion toggle, and page controls.
+Actions still execute through `PopupView.actionButton`, including its secondary-click, group,
+loading, usage, and delivery behavior.
+
+Search palettes, result cards, and hover sub-bars retain their existing presentation. Group hover
+sub-bars attach outside the disk, above/below its nearest half, rather than covering other sectors. A stored
+`PopupPanel.radialActionFrame` restores the radial menu's original placement when returning from
+search/content, including later hosting-view resize passes. Circular hit-testing excludes the
+transparent disk corners as well as the shadow inset, using the same click-through/dismissal
+path as the horizontal bar's shadow ring.
+
+Enabled AI presets appear individually in both popup layouts and as top-level Actions preference
+rows. Clicking runs the existing AI loading/streaming flow directly; the AI Tools settings row
+remains in Preferences for provider configuration. Each preset's gear opens its prompt editor.
+The full search catalog still includes disabled presets. AI rows now retain their user-defined
+order alongside other canonical action IDs.
+
 ## Window Components
 
 ```
@@ -161,16 +195,12 @@ already visible; the bar's command-glyph button enters search via `onEnterSearch
 
 ### Scoped Sub-Action Palette
 
-Opening a group/AI bar row and reaching the palette from hotkey are the same surface, differing only
-in `modeStore.scope`:
+Clicking a group in the popup opens the action palette with a search scope.
 
-- **Entering scoped**: a bar click on a group row (`.openSubActions`) or the AI Tools launcher
-  (`chrome.launchesAI`) calls `PopupWindowController.enterScopedSearch(for:)`
-  (`PopupWindowController.swift:158`), which resolves the parent's children via the Core
-  `SubActionResolver` over `searchCatalog` and calls `enterSearch(with: SearchScope(parent:children:))`.
-  `modeStore.scope` (added Task 5) carries the parent + pre-resolved children.
-- **Membership is protocol-driven**: `GroupAction` and `AIToolsAction` conform to `SubActionProviding`
-  (Core, `SubAction.swift`); resolution is id-prefix/`.ai` driven, never `switch action.id`.
+- `PopupWindowController.enterScopedSearch(for:)` resolves children from the current search catalog
+  and stores the parent and children in `modeStore.scope`. `GroupAction` and `CustomGroupAction`
+  supply members through `SubActionProviding`.
+- Hovering a group opens its transient sub-bar. An AI preset runs directly when clicked.
 - **Scoped view behavior**: `PopupSearchView` matches/search-catalogs only `scope.children`
   (`PopupSearchView.swift:49`), swaps the field's leading icon to the parent's, and the placeholder
   reads **"Search within <parent.title>"**. Esc (`onExitScope`) drops the scope; the leading icon and

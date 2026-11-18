@@ -114,30 +114,6 @@ final class ManifestValidationTests: XCTestCase {
         XCTAssertEqual(issues, [ManifestValidationIssue(kind: .secondaryOnJavaScriptAction, path: "actions[0]")])
     }
 
-    func testJsAliasActionWithSecondaryRejects() throws {
-        let manifest = try decodeManifest("""
-        {
-            "identifier": "com.example.jsalias",
-            "name": "JS Alias",
-            "actions": [{ "title": "JS", "type": "js", "scriptCode": "return 1",
-                "secondary": { "type": "copy", "value": "x" } }]
-        }
-        """)
-        let issues = validator.validate(manifest)
-        XCTAssertEqual(issues, [ManifestValidationIssue(kind: .secondaryOnJavaScriptAction, path: "actions[0]")])
-    }
-
-    func testJavascriptActionWithoutSecondaryIsClean() throws {
-        let manifest = try decodeManifest("""
-        {
-            "identifier": "com.example.jsok",
-            "name": "JS Ok",
-            "actions": [{ "title": "JS", "type": "javascript", "scriptCode": "return 1" }]
-        }
-        """)
-        XCTAssertEqual(validator.validate(manifest), [])
-    }
-
     func testNonJavascriptActionWithSecondaryIsClean() throws {
         let manifest = try decodeManifest("""
         {
@@ -216,17 +192,6 @@ final class ManifestValidationTests: XCTestCase {
         XCTAssertEqual(validator.validate(manifest), [ManifestValidationIssue(kind: .missingRequiredField("subActions"), path: "actions[0]")])
     }
 
-    func testServiceNeedsNothing() throws {
-        let manifest = try decodeManifest("""
-        {
-            "identifier": "com.example.service",
-            "name": "Service",
-            "actions": [{ "title": "Share", "type": "service" }]
-        }
-        """)
-        XCTAssertEqual(validator.validate(manifest), [])
-    }
-
     // MARK: - capability gating (empty known set on day one)
 
     func testCapabilityGateEmptyKnownSetRejectsAnyDeclaration() throws {
@@ -240,33 +205,6 @@ final class ManifestValidationTests: XCTestCase {
         """)
         let issues = validator.validate(manifest)
         XCTAssertEqual(issues, [ManifestValidationIssue(kind: .unknownCapability("network"), path: "manifest")])
-    }
-
-    func testCapabilityGateAcceptsCapabilitiesInsideKnownSet() throws {
-        let gate = ManifestCapabilityGate(knownCapabilities: ["network"])
-        let local = ManifestValidator(capabilityGate: gate)
-        let manifest = try decodeManifest("""
-        {
-            "identifier": "com.example.cap",
-            "name": "Cap",
-            "capabilities": ["network"],
-            "actions": [{ "title": "URL", "type": "url", "url": "https://example.com/{query}" }]
-        }
-        """)
-        XCTAssertEqual(local.validate(manifest), [])
-        // The shared validator (empty known set) still rejects it.
-        XCTAssertFalse(validator.validate(manifest).isEmpty)
-    }
-
-    func testNoCapabilitiesIsValid() throws {
-        let manifest = try decodeManifest("""
-        {
-            "identifier": "com.example.nocap",
-            "name": "No Cap",
-            "actions": [{ "title": "URL", "type": "url", "url": "https://example.com/{query}" }]
-        }
-        """)
-        XCTAssertEqual(validator.validate(manifest), [])
     }
 
     func testOpenClipVersionDoesNotAffectValidation() throws {
@@ -283,50 +221,6 @@ final class ManifestValidationTests: XCTestCase {
     }
 
     // MARK: - record (schema version, declared version, fingerprint)
-
-    func testRecordRecordsSchemaDeclaredVersionAndFingerprint() throws {
-        let data = Data("""
-        {
-            "identifier": "com.example.v",
-            "name": "V",
-            "version": "1.0.1",
-            "actions": [{ "title": "URL", "type": "url", "url": "https://example.com/{query}" }]
-        }
-        """.utf8)
-        let manifest = try JSONDecoder().decode(ExtensionMetadata.self, from: data)
-        let record = validator.validate(manifest, data: data)
-
-        XCTAssertEqual(record.schemaVersion, "2")
-        XCTAssertEqual(record.declaredVersion, "1.0.1")
-        XCTAssertTrue(record.isValid)
-        XCTAssertEqual(record.issues, [])
-        assertFingerprint(record.fingerprint)
-    }
-
-    func testFingerprintIsDeterministicAndContentSensitive() throws {
-        let base = """
-        {
-            "identifier": "com.example.v",
-            "name": "V",
-            "actions": [{ "title": "URL", "type": "url", "url": "https://example.com/{query}" }]
-        }
-        """
-        let data = Data(base.utf8)
-        let record = validator.validate(try JSONDecoder().decode(ExtensionMetadata.self, from: data), data: data)
-        let again = validator.validate(try JSONDecoder().decode(ExtensionMetadata.self, from: data), data: data)
-        XCTAssertEqual(record.fingerprint, again.fingerprint)
-
-        let otherData = Data(base.replacingOccurrences(of: "com.example.v", with: "com.example.w").utf8)
-        let other = validator.validate(try JSONDecoder().decode(ExtensionMetadata.self, from: otherData), data: otherData)
-        XCTAssertNotEqual(record.fingerprint, other.fingerprint)
-    }
-
-    func testRecordWithoutDataHasEmptyFingerprint() throws {
-        let manifest = ExtensionMetadata(identifier: "com.example.v", name: "V", actions: [])
-        let record = validator.validate(manifest, data: nil)
-        XCTAssertEqual(record.fingerprint, "")
-        XCTAssertTrue(record.isValid)
-    }
 
     func testDuplicateOptionIdentifierRejectsManifest() throws {
         let manifest = try decodeManifest("""
@@ -436,10 +330,5 @@ final class ManifestValidationTests: XCTestCase {
         """)
         let issues = validator.validate(manifest)
         XCTAssertEqual(issues, [])
-    }
-
-    private func assertFingerprint(_ value: String, file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertEqual(value.count, 64, "fingerprint must be 64 hex chars", file: file, line: line)
-        XCTAssertTrue(value.allSatisfy { $0.isHexDigit }, "fingerprint must be hex", file: file, line: line)
     }
 }

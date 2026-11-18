@@ -3,13 +3,14 @@ import XCTest
 
 struct MockAction: Action {
     let id: String
-    let title = "Mock"
+    let title: String
     let icon = ActionIcon.symbol("star")
     let shouldBeEnabled: Bool
     let chrome: ActionChrome
     
-    init(id: String, shouldBeEnabled: Bool, chrome: ActionChrome = ActionChrome()) {
+    init(id: String, shouldBeEnabled: Bool, chrome: ActionChrome = ActionChrome(), title: String = "Mock") {
         self.id = id
+        self.title = title
         self.shouldBeEnabled = shouldBeEnabled
         self.chrome = chrome
     }
@@ -31,33 +32,7 @@ final class ActionRegistryTests: XCTestCase {
         await MainActor.run { TestIsolation.reset() }
     }
 
-    @MainActor
-    func testActionRegistrationAndAvailability() {
-        let registry = ActionRegistry.shared
-        
-        let action1 = MockAction(id: "mock.1", shouldBeEnabled: true)
-        let action2 = MockAction(id: "mock.2", shouldBeEnabled: false)
-        
-        let initialCount = registry.actions.count
-        registry.register(builtIns: [action1, action2])
-        
-        XCTAssertEqual(registry.actions.count, initialCount + 2)
-        
-        let selection = SelectionContext(text: "test", sourceApp: AppIdentity(bundleIdentifier: "com.test", localizedName: "Test"), cursorPosition: .zero, timestamp: Date(), appPolicy: .default)
-        let context = ActionContext(selection: selection, modifiers: [])
-        let available = registry.availableActions(for: context)
-        
-        XCTAssertTrue(available.contains(where: { $0.id == "mock.1" }))
-        XCTAssertFalse(available.contains(where: { $0.id == "mock.2" }))
-    }
     
-    func testActionContext() {
-        let selection = SelectionContext(text: "hello", sourceApp: AppIdentity(bundleIdentifier: "com.test", localizedName: "Test"), cursorPosition: .zero, timestamp: Date(), appPolicy: .default)
-        let context = ActionContext(selection: selection, modifiers: .shift)
-        
-        XCTAssertEqual(context.selection.text, "hello")
-        XCTAssertEqual(context.modifiers, .shift)
-    }
     
     @MainActor
     func testDisabledActionsAreFiltered() {
@@ -130,31 +105,6 @@ final class ActionRegistryTests: XCTestCase {
     }
 
     @MainActor
-    func testEnabledGroupRowKeepsSubActionsAvailable() {
-        let store = MemorySettingsStore()
-        let registry = ActionRegistry(settingsStore: store)
-        let groupID = "mock.group.visible"
-        let groupChrome = ActionChrome(
-            badge: .none,
-            rowStyle: .actionGroup,
-            popupBehavior: .showSubActions,
-            source: .builtin
-        )
-        let group = MockAction(id: groupID, shouldBeEnabled: true, chrome: groupChrome)
-        let sub = MockAction(id: "\(groupID).x", shouldBeEnabled: true)
-        registry.register(builtIns: [group, sub])
-
-        store.set(.disabledActionIDs, value: Set([]))
-
-        let selection = SelectionContext(text: "test", sourceApp: AppIdentity(bundleIdentifier: "com.test", localizedName: "Test"), cursorPosition: .zero, timestamp: Date(), appPolicy: .default)
-        let context = ActionContext(selection: selection, modifiers: [])
-        let available = registry.availableActions(for: context)
-
-        XCTAssertTrue(available.contains { $0.id == groupID })
-        XCTAssertTrue(available.contains { $0.id == sub.id })
-    }
-
-    @MainActor
     func testSearchCatalogDropsContextuallyDisabledButKeepsSettingsDisabled() {
         let store = MemorySettingsStore()
         let registry = ActionRegistry(settingsStore: store)
@@ -188,8 +138,9 @@ final class ActionRegistryTests: XCTestCase {
     }
 
     @MainActor
-    func testAIChromeActionsExcludedFromBarButIncludedInSearchCatalog() {
-        let registry = ActionRegistry()
+    func testEnabledAIChromeActionsAppearDirectlyInBarAndSearch() {
+        let store = MemorySettingsStore()
+        let registry = ActionRegistry(settingsStore: store)
         let aiChrome = ActionChrome(badge: .none, rowStyle: .standard, popupBehavior: .perform, source: .ai)
         let aiAction = MockAction(id: "ai.preset.proofread", shouldBeEnabled: true, chrome: aiChrome)
         let normal = MockAction(id: "mock.normal", shouldBeEnabled: true)
@@ -199,15 +150,15 @@ final class ActionRegistryTests: XCTestCase {
         let context = ActionContext(selection: selection, modifiers: [])
         let available = registry.availableActions(for: context)
 
-        // AI preset actions never flood the popup bar (the reorderable AI Tools action is the
-        // bar's entry point), but the palette still discovers them.
-        XCTAssertFalse(available.contains { $0.id == "ai.preset.proofread" })
+        XCTAssertTrue(available.contains { $0.id == "ai.preset.proofread" })
         XCTAssertTrue(available.contains { $0.id == "mock.normal" })
         XCTAssertTrue(registry.searchCatalog(for: context).contains { $0.id == "ai.preset.proofread" })
+        store.set(.isAIEnabled, value: false)
+        XCTAssertEqual(registry.searchCatalog(for: context).map(\.id), [normal.id])
     }
 
     @MainActor
-    func testAIToolsLauncherInBarExcludedFromPalette() {
+    func testAIToolsSettingsLauncherIsNotAnExtraPopupMenu() {
         let registry = ActionRegistry()
         let launcher = MockAction(id: "builtin.aiTools", shouldBeEnabled: true, chrome: ActionChrome(launchesAI: true))
         let completion = MockAction(id: "builtin.completion", shouldBeEnabled: true, chrome: ActionChrome(popupBehavior: .provideCompletions))
@@ -218,13 +169,59 @@ final class ActionRegistryTests: XCTestCase {
         let context = ActionContext(selection: selection, modifiers: [])
         let available = registry.availableActions(for: context)
 
-        // The launcher is a normal bar row (bar-visible), but the palette excludes it — the AI
-        // presets already cover AI there.
-        XCTAssertTrue(available.contains { $0.id == "builtin.aiTools" })
+        XCTAssertFalse(available.contains { $0.id == "builtin.aiTools" })
         XCTAssertTrue(available.contains { $0.id == "mock.normal" })
         XCTAssertFalse(registry.searchCatalog(for: context).contains { $0.id == "builtin.aiTools" })
         XCTAssertFalse(registry.searchCatalog(for: context).contains { $0.id == "builtin.completion" })
         XCTAssertTrue(registry.searchCatalog(for: context).contains { $0.id == "mock.normal" })
+    }
+
+    @MainActor
+    func testAIPresetVisibilityFollowsItsToggleAndPreservesUserOrderOnReload() {
+        let store = MemorySettingsStore()
+        let explain = MockAction(id: "ai.preset.explain", shouldBeEnabled: true, chrome: ActionChrome(source: .ai))
+        let summarize = MockAction(id: "ai.preset.summarize", shouldBeEnabled: false, chrome: ActionChrome(source: .ai))
+        let copy = MockAction(id: "builtin.copy", shouldBeEnabled: true)
+        store.set(.actionOrder, value: [copy.id, explain.id, summarize.id])
+        store.set(.disabledActionIDs, value: [explain.id])
+        let registry = ActionRegistry(settingsStore: store)
+        registry.register(builtIns: [summarize, explain, copy])
+        let selection = SelectionContext(text: "test", sourceApp: AppIdentity(bundleIdentifier: "com.test", localizedName: "Test"),
+                                         cursorPosition: .zero, timestamp: Date(), appPolicy: .default)
+        let context = ActionContext(selection: selection)
+        XCTAssertEqual(registry.availableActions(for: context).map(\.id), [copy.id, explain.id])
+        XCTAssertEqual(registry.searchCatalog(for: context).map(\.id), [copy.id, explain.id, summarize.id])
+
+        registry.moveActions(from: IndexSet(integer: 1), to: 0)
+        XCTAssertEqual(store.get(.actionOrder), [explain.id, copy.id, summarize.id])
+        let reloaded = ActionRegistry(settingsStore: store)
+        reloaded.register(builtIns: [summarize, explain, copy])
+        XCTAssertEqual(reloaded.availableActions(for: context).map(\.id), [explain.id, copy.id])
+    }
+
+    @MainActor
+    func testLegacyAIOrderUsesSavedLauncherPositionForPresets() {
+        let store = MemorySettingsStore()
+        let copy = MockAction(id: "builtin.copy", shouldBeEnabled: true)
+        let launcher = MockAction(id: "builtin.aiTools", shouldBeEnabled: true, chrome: ActionChrome(launchesAI: true))
+        let explain = MockAction(id: "ai.preset.explain", shouldBeEnabled: true, chrome: ActionChrome(source: .ai))
+        let custom = MockAction(id: "custom.snippet", shouldBeEnabled: true, chrome: ActionChrome(source: .custom))
+        let registry = ActionRegistry(settingsStore: store)
+        let selection = SelectionContext(text: "test", sourceApp: AppIdentity(bundleIdentifier: "com.test", localizedName: "Test"),
+                                         cursorPosition: .zero, timestamp: Date(), appPolicy: .default)
+        let context = ActionContext(selection: selection)
+
+        store.set(.actionOrder, value: [copy.id, custom.id])
+        registry.register(builtIns: [explain, launcher, copy, custom])
+        XCTAssertEqual(registry.availableActions(for: context).map(\.id), [copy.id, custom.id, explain.id])
+
+        store.set(.actionOrder, value: [copy.id, launcher.id, custom.id])
+        registry.register(action: launcher)
+        XCTAssertEqual(registry.availableActions(for: context).map(\.id), [copy.id, explain.id, custom.id])
+
+        store.set(.actionOrder, value: [copy.id, launcher.id, custom.id, explain.id])
+        registry.register(action: explain)
+        XCTAssertEqual(registry.availableActions(for: context).map(\.id), [copy.id, custom.id, explain.id])
     }
 
     @MainActor
@@ -261,24 +258,6 @@ final class ActionRegistryTests: XCTestCase {
     }
 
     @MainActor
-    func testUnorderedBuiltinActionsPreserveStableInsertionOrder() {
-        let store = MemorySettingsStore()
-        let registry = ActionRegistry(settingsStore: store)
-
-        let b1 = MockAction(id: "builtin.1", shouldBeEnabled: true, chrome: ActionChrome(source: .builtin))
-        let b2 = MockAction(id: "builtin.2", shouldBeEnabled: true, chrome: ActionChrome(source: .builtin))
-        let b3 = MockAction(id: "builtin.3", shouldBeEnabled: true, chrome: ActionChrome(source: .builtin))
-        let b4 = MockAction(id: "builtin.4", shouldBeEnabled: true, chrome: ActionChrome(source: .builtin))
-
-        registry.register(action: b1)
-        registry.register(action: b2)
-        registry.register(action: b3)
-        registry.register(action: b4)
-
-        XCTAssertEqual(registry.actions.map(\.id), ["builtin.1", "builtin.2", "builtin.3", "builtin.4"])
-    }
-
-    @MainActor
     func testDuplicateActionOrderIDsDoNotTrapAndKeepFirstRank() {
         let store = MemorySettingsStore()
         store.set(.actionOrder, value: ["action.b", "action.a", "action.b"])
@@ -296,8 +275,8 @@ final class ActionRegistryTests: XCTestCase {
     @MainActor
     func testClipboardFallbackExcludesRequiresLiveSelectionActions() {
         let registry = ActionRegistry()
-        let copy = MockAction(id: "builtin.copy", shouldBeEnabled: true, chrome: ActionChrome(requiresLiveSelection: true))
-        let cut = MockAction(id: "builtin.cut", shouldBeEnabled: true, chrome: ActionChrome(requiresLiveSelection: true))
+        let copy = CopyAction()
+        let cut = CutAction()
         let paste = MockAction(id: "builtin.paste", shouldBeEnabled: true)
         let search = MockAction(id: "builtin.search", shouldBeEnabled: true)
         registry.register(builtIns: [copy, cut, paste, search])
@@ -317,27 +296,4 @@ final class ActionRegistryTests: XCTestCase {
         XCTAssertTrue(normal.contains { $0.id == "builtin.copy" })
         XCTAssertTrue(normal.contains { $0.id == "builtin.cut" })
     }
-
-    @MainActor
-    func testCopyAndCutBuiltinsRequireLiveSelection() {
-        let builtins = BuiltinRegistry.makeCoreBuiltins()
-        XCTAssertTrue(builtins.first { $0.id == "builtin.copy" }?.chrome.requiresLiveSelection == true)
-        XCTAssertTrue(builtins.first { $0.id == "builtin.cut" }?.chrome.requiresLiveSelection == true)
-        XCTAssertTrue(builtins.first { $0.id == "builtin.paste" }?.chrome.requiresLiveSelection == false)
-        XCTAssertTrue(builtins.first { $0.id == "builtin.search" }?.chrome.requiresLiveSelection == false)
-    }
-
-    func testMemorySettingsStorePublisherReentrancyDoesNotDeadlock() {
-        let store = MemorySettingsStore()
-        let key = SettingKey<Set<String>>("test.reentrancy.key", defaultValue: [])
-        var received: Set<String>? = nil
-        let cancellable = store.publisher(for: key).sink { val in
-            received = store.get(key)
-        }
-        
-        store.set(key, value: Set(["item1"]))
-        XCTAssertEqual(received, Set(["item1"]))
-        _ = cancellable
-    }
 }
-

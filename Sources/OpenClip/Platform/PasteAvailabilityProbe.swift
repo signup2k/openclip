@@ -98,15 +98,13 @@ public struct PasteAvailabilityProbe: PasteAvailabilityProbing {
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         return await withCheckedContinuation { (continuation: CheckedContinuation<Bool?, Never>) in
             let resume = OnceResume<Bool?>()
-            let watchdog = TaskBox()
-
-            watchdog.set(Task {
+            let watchdog = Task {
                 try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
                 if resume.resume(continuation, with: nil) {
                     Task.detached { await PasteAvailabilityProbe.probeGate.release() }
                     Log.selection.debug("paste probe: Edit ▸ Paste lookup for pid \(pid, privacy: .public) exceeded \(timeoutSeconds, privacy: .public)s deadline; reporting unknown")
                 }
-            })
+            }
 
             PasteAvailabilityProbe.axProbeQueue.async {
                 let enabled = lookup(pid, deadline)

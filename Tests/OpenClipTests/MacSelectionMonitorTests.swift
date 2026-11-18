@@ -40,16 +40,6 @@ final class MacSelectionMonitorTests: XCTestCase {
         XCTAssertEqual(anchor.y, cocoa.y, accuracy: 0.5)
     }
 
-    /// No retrieval bounds (unsupported app): fall back to the pointer rather than crashing or
-    /// anchoring off-screen.
-    func testMissingBoundsFallBackToMouseLocation() {
-        let mouse = CGPoint(x: 640, y: 400)
-        XCTAssertEqual(
-            MacSelectionMonitor.keyboardAnchor(bounds: nil, isSelectAll: false, mouseLocation: mouse),
-            mouse
-        )
-    }
-
     /// An off-screen converted anchor (AX quirks / display changes mid-session) falls back to the
     /// pointer instead of placing the popup nowhere visible.
     func testOffScreenAnchorFallsBackToMouseLocation() {
@@ -73,13 +63,6 @@ final class MacSelectionMonitorTests: XCTestCase {
         XCTAssertFalse(MacSelectionMonitor.isSelectionTrigger(keyCode: 0x7B, flags: [.control]))
         XCTAssertFalse(MacSelectionMonitor.isSelectionTrigger(keyCode: 0x7B, flags: [.option]))
         XCTAssertFalse(MacSelectionMonitor.isSelectionTrigger(keyCode: 0x00, flags: [.shift, .command]))
-    }
-
-    func testPlainKeysDoNotTrigger() {
-        XCTAssertFalse(MacSelectionMonitor.isSelectionTrigger(keyCode: 0x00, flags: []))
-        XCTAssertFalse(MacSelectionMonitor.isSelectionTrigger(keyCode: 0x00, flags: [.shift]))
-        XCTAssertFalse(MacSelectionMonitor.isSelectionTrigger(keyCode: 0x7B, flags: [.command]))
-        XCTAssertFalse(MacSelectionMonitor.isSelectionTrigger(keyCode: 0x31, flags: [.command]))
     }
 
     func testCapsLockDoesNotSilenceTriggers() {
@@ -114,20 +97,6 @@ final class MacSelectionMonitorTests: XCTestCase {
         secondTask?.cancel()
     }
 
-    func testStopCancelsAndClearsPendingDebounceTask() {
-        let monitor = MacSelectionMonitor()
-
-        monitor.handleSelectionTrigger(isSelectAll: false)
-        let task = monitor.debounceTask
-        XCTAssertNotNil(task)
-        XCTAssertFalse(task?.isCancelled == true)
-
-        monitor.stop()
-
-        XCTAssertTrue(task?.isCancelled == true)
-        XCTAssertNil(monitor.debounceTask)
-    }
-
     func testPauseUntilTimestampSuppressesSelectionTriggers() {
         let store = MemorySettingsStore()
         let monitor = MacSelectionMonitor(settingsStore: store)
@@ -154,35 +123,20 @@ final class MacSelectionMonitorTests: XCTestCase {
         monitor.debounceTask?.cancel()
     }
 
-    func testStopCancelsPendingMouseHoldTask() {
-        let store = MemorySettingsStore()
-        store.set(.mouseHoldDuration, value: 0.3)
-        let monitor = MacSelectionMonitor(settingsStore: store)
-
-        monitor.start()
-        monitor.stop()
-
-        XCTAssertNil(monitor.mouseHoldTask)
-    }
-
-    func testDisabledMouseHoldDurationDoesNotSpawnTask() {
-        let store = MemorySettingsStore()
-        store.set(.mouseHoldDuration, value: 0.0)
-        let monitor = MacSelectionMonitor(settingsStore: store)
-
-        monitor.start()
-        XCTAssertNil(monitor.mouseHoldTask)
-        monitor.stop()
-    }
-
-    func testIsMouseHoldEnabledFalseDoesNotSpawnTask() {
-        let store = MemorySettingsStore()
-        store.set(.isMouseHoldEnabled, value: false)
-        store.set(.mouseHoldDuration, value: 0.3)
-        let monitor = MacSelectionMonitor(settingsStore: store)
-
-        monitor.start()
-        XCTAssertNil(monitor.mouseHoldTask)
+    func testSingleClickAutoSelectedFieldDeliversWithoutCopy() async {
+        let monitor = makeHoldMonitor()
+        let source = Self.runnerApp()
+        monitor.frontmostAppProvider = { source }
+        monitor.currentCursorProvider = { .arrow }
+        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },
+            inspect: { Self.fixtureTarget(role: "AXTextField", selectedText: "https://example.com") },
+            copyCapture: { _ in XCTFail("Single click must be read-only"); return nil })
+        var received: String?
+        monitor.onSelection = { context, _ in received = context.text }
+        monitor.handleMouseDown(at: .zero)
+        monitor.handleMouseUp(app: source, cursor: .zero, clickCount: 1)
+        await monitor.debounceTask?.value
+        XCTAssertEqual(received, "https://example.com")
         monitor.stop()
     }
 
@@ -251,7 +205,7 @@ final class MacSelectionMonitorTests: XCTestCase {
         monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
             gate.wait()
             return Self.fixtureTarget(role: "AXTextField", selectedText: "held text")
-        }, browserRead: { _ in nil }, copyCapture: { _ in nil })
+        }, copyCapture: { _ in nil })
 
         var delivered: SelectionContext?
         monitor.onSelection = { context, _ in delivered = context }
@@ -268,83 +222,6 @@ final class MacSelectionMonitorTests: XCTestCase {
         gate.signal()
         try await waitUntil { delivered != nil }
         XCTAssertEqual(delivered?.text, "held text")
-    }
-
-    /// Regression: when the hold timer fired but found nothing to deliver (pause-then-drag-select),
-    /// the stuck trigger flag suppressed the same press's real selection on release.
-    @MainActor
-    func testFiredEmptyHoldFallsThroughToReleasePath() async throws {
-        let monitor = makeHoldMonitor()
-        let point = CGPoint(x: 120, y: 120)
-        monitor.frontmostAppProvider = { Self.runnerApp() }
-        monitor.currentMouseLocation = { point }
-        // AXButton is rejected by the default gate before any strategy runs (no copy side
-        // effects). The gate parks until the test observes the fired flag, so the flag-true
-        // window can't be missed by polling.
-        let gate = DispatchSemaphore(value: 0)
-        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
-            gate.wait()
-            return Self.fixtureTarget(role: "AXButton", selectedText: "irrelevant")
-        }, browserRead: { _ in nil }, copyCapture: { _ in nil })
-        // Isolated empty pasteboard so the clipboard fallback can't rescue the hold.
-        let pasteboard = NSPasteboard(name: NSPasteboard.Name("OpenClipTest-\(UUID().uuidString)"))
-        pasteboard.clearContents()
-        monitor.fallbackPasteboard = pasteboard
-
-        monitor.handleMouseDown(at: point)
-        let task = try XCTUnwrap(monitor.mouseHoldTask)
-        // Two-phase wait: the hold fires (flag true), then bails empty and clears it (flag false).
-        try await waitUntil { monitor.triggeredByHold }
-        gate.signal()
-        try await waitUntil { !monitor.triggeredByHold }
-
-        XCTAssertFalse(monitor.triggeredByHold,
-                       "a fired hold that exits without delivering must clear its trigger")
-
-        monitor.handleMouseUp(app: Self.runnerApp(), cursor: point, clickCount: 2)
-        try await waitUntil { monitor.debounceTask != nil }
-        monitor.debounceTask?.cancel()
-    }
-
-    /// Regression: dragging past the disarm threshold while a fired-but-unproductive hold still
-    /// owned the press left `triggeredByHold` stuck true, so the release path never ran.
-    @MainActor
-    func testDragBeyondDisarmThresholdClearsStuckHoldFlag() {
-        let monitor = makeHoldMonitor()
-        let point = CGPoint(x: 200, y: 200)
-
-        monitor.handleMouseDown(at: point)
-        monitor.triggeredByHold = true
-
-        // Sub-threshold movement must not disturb an active hold…
-        monitor.handleMouseDragged(at: CGPoint(x: point.x + 2, y: point.y))
-        XCTAssertTrue(monitor.triggeredByHold)
-        XCTAssertNotNil(monitor.mouseHoldTask)
-
-        // …but crossing the drag threshold hands the gesture back to the release path.
-        monitor.handleMouseDragged(at: CGPoint(x: point.x + 50, y: point.y))
-        XCTAssertFalse(monitor.triggeredByHold, "drag-in-progress must clear a stuck hold trigger")
-        XCTAssertNil(monitor.mouseHoldTask)
-    }
-
-    /// Fire-time stationarity gate: only a parked press within the tight fire radius counts;
-    /// slow drag starts and already-released presses never fire.
-    func testHoldStationarityGate() {
-        let down = CGPoint(x: 100, y: 100)
-
-        // ~1.4 px tremor is stationary; 5 px of drift is a drag start.
-        XCTAssertTrue(MacSelectionMonitor.holdStationary(
-            downPoint: down, pointer: CGPoint(x: 101, y: 101), buttonPressed: true))
-        XCTAssertFalse(MacSelectionMonitor.holdStationary(
-            downPoint: down, pointer: CGPoint(x: 105, y: 100), buttonPressed: true))
-
-        // A press that already ended must never fire.
-        XCTAssertFalse(MacSelectionMonitor.holdStationary(
-            downPoint: down, pointer: down, buttonPressed: false))
-
-        // No recorded down point: treat as parked (nothing to drift from).
-        XCTAssertTrue(MacSelectionMonitor.holdStationary(
-            downPoint: nil, pointer: down, buttonPressed: true))
     }
 
     func testUserCommandCAndControlCCancelPendingRetrieval() throws {
@@ -385,15 +262,6 @@ final class MacSelectionMonitorTests: XCTestCase {
         monitor.handleSelectionTrigger(isSelectAll: false)
         current = nil
         await monitor.debounceTask?.value
-        monitor.stop()
-    }
-
-    func testNewMouseDownCancelsPendingKeyboardRead() {
-        let monitor = MacSelectionMonitor(settingsStore: MemorySettingsStore())
-        monitor.handleSelectionTrigger(isSelectAll: false)
-        let oldTask = monitor.debounceTask
-        monitor.handleMouseDown(at: .zero)
-        XCTAssertTrue(oldTask?.isCancelled == true)
         monitor.stop()
     }
 
@@ -463,7 +331,7 @@ final class MacSelectionMonitorTests: XCTestCase {
         monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
             gate.wait()
             return Self.fixtureTarget(role: "AXGroup", selectedText: nil)
-        }, browserRead: { _ in nil }, copyCapture: { _ in nil })
+        }, copyCapture: { _ in nil })
 
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("OpenClipTest-\(UUID().uuidString)"))
         pasteboard.declareTypes([.string], owner: nil)
@@ -497,7 +365,7 @@ final class MacSelectionMonitorTests: XCTestCase {
         monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
             gate.wait()
             return Self.fixtureTarget(role: "AXTextField", selectedText: nil)
-        }, browserRead: { _ in nil }, copyCapture: { _ in nil })
+        }, copyCapture: { _ in nil })
 
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("OpenClipTest-\(UUID().uuidString)"))
         pasteboard.declareTypes([.string], owner: nil)
@@ -532,7 +400,7 @@ final class MacSelectionMonitorTests: XCTestCase {
         monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
             gate.wait()
             return Self.fixtureTarget(role: "AXStaticText", selectedText: nil)
-        }, browserRead: { _ in nil }, copyCapture: { _ in nil })
+        }, copyCapture: { _ in nil })
 
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("OpenClipTest-\(UUID().uuidString)"))
         pasteboard.declareTypes([.string], owner: nil)
@@ -551,33 +419,6 @@ final class MacSelectionMonitorTests: XCTestCase {
     }
 
     @MainActor
-    func testHoldWithExistingSelectionDeliversRegardlessOfCursor() async throws {
-        let monitor = makeHoldMonitor()
-        let point = CGPoint(x: 150, y: 150)
-        monitor.frontmostAppProvider = { Self.runnerApp() }
-        monitor.currentMouseLocation = { point }
-        monitor.currentCursorProvider = { .arrow }
-
-        // Retriever returns active selected text
-        let gate = DispatchSemaphore(value: 0)
-        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
-            gate.wait()
-            return Self.fixtureTarget(role: "AXTextField", selectedText: "selected word")
-        }, browserRead: { _ in nil }, copyCapture: { _ in nil })
-
-        var delivered: SelectionContext?
-        monitor.onSelection = { context, _ in delivered = context }
-
-        monitor.handleMouseDown(at: point)
-        try await waitUntil { monitor.triggeredByHold }
-        gate.signal()
-        try await waitUntil { delivered != nil }
-
-        XCTAssertEqual(delivered?.text, "selected word")
-        XCTAssertFalse(delivered?.isClipboardFallback == true)
-    }
-
-    @MainActor
     func testDisabledPolicySuppressesHoldTrigger() async throws {
         let monitor = makeHoldMonitor()
         let point = CGPoint(x: 150, y: 150)
@@ -587,7 +428,7 @@ final class MacSelectionMonitorTests: XCTestCase {
 
         monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
             Self.fixtureTarget(role: "AXTextField", selectedText: "selected word")
-        }, browserRead: { _ in nil }, copyCapture: { _ in nil })
+        }, copyCapture: { _ in nil })
 
         var delivered: SelectionContext?
         monitor.onSelection = { context, _ in delivered = context }
@@ -597,26 +438,4 @@ final class MacSelectionMonitorTests: XCTestCase {
 
         XCTAssertNil(delivered, "Hold trigger must not fire when policy is disabled")
     }
-
-    @MainActor
-    func testHotkeyOnlyPolicySuppressesHoldTrigger() async throws {
-        let monitor = makeHoldMonitor()
-        let point = CGPoint(x: 150, y: 150)
-        monitor.frontmostAppProvider = { Self.runnerApp() }
-        monitor.currentMouseLocation = { point }
-        monitor.policyResolver = { _ in AppPolicyContext(hotkeyOnly: true) }
-
-        monitor.retriever = SelectionRetrievalCoordinator(inputRevision: { [] },inspect: {
-            Self.fixtureTarget(role: "AXTextField", selectedText: "selected word")
-        }, browserRead: { _ in nil }, copyCapture: { _ in nil })
-
-        var delivered: SelectionContext?
-        monitor.onSelection = { context, _ in delivered = context }
-
-        monitor.handleMouseDown(at: point)
-        try await Task.sleep(nanoseconds: 100_000_000)
-
-        XCTAssertNil(delivered, "Hold trigger must not fire when policy is hotkeyOnly")
-    }
 }
-

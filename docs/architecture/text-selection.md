@@ -31,7 +31,7 @@ The subsystem consists of three primary components:
 ```
 
 1. **[`MacSelectionMonitor`](../../Sources/OpenClip/Platform/MacSelectionMonitor.swift)**: Listens for mouse release events (`leftMouseUp`) and keyboard selection gestures (⌘A select-all, ⇧+arrow) and dispatches retrieval.
-2. **[`SelectionRetrievalCoordinator`](../../Sources/OpenClip/Platform/Selection/SelectionRetrievalCoordinator.swift)**: Applies the gate, resolves the app's retrieval mode from [`AppPolicyContext`](../../Sources/Core/Rules/AppRule.swift), and routes to the matching strategy. [`MacTextRetriever`](../../Sources/OpenClip/Platform/MacTextRetriever.swift) is now a thin `TextRetrieving` facade over it.
+2. **[`SelectionRetrievalCoordinator`](../../Sources/OpenClip/Platform/Selection/SelectionRetrievalCoordinator.swift)**: Applies the gate, resolves the app's retrieval mode from [`AppPolicyContext`](../../Sources/Core/Rules/AppRule.swift), and returns a `TextResult`. The selection monitor and hotkey manager call it directly.
 3. **Context assembly**: `MacSelectionMonitor` resolves app rules via [`RuleEngine`](../../Sources/Core/Rules/RuleEngine.swift), builds a [`SelectionContext`](../../Sources/Core/Selection/SelectionContext.swift), and notifies subscriber callbacks (such as `PopupWindowController`).
 
 ---
@@ -117,15 +117,12 @@ Both copy modes run through [`PasteboardCopyEngine`](../../Sources/OpenClip/Plat
 
 ## Shortcut Clipboard Fallback
 
-The retrieval path above applies to *passive selection monitoring*. The global toggle shortcut ([`HotkeyManager`](../../Sources/OpenClip/Platform/HotkeyManager.swift)) has an extra path: if the frontmost app yields no selection (empty or whitespace-only text), OpenClip falls back to the current contents of `NSPasteboard.general` so the popup still has input to act on.
-
-- This happens only on explicit shortcut invocation, never during passive monitoring.
-- The context is flagged `SelectionContext.isClipboardFallback`; `PopupWindowController.show` then filters the available actions down to **Paste** (the AI Tools launcher stays available — it doesn't touch the selection). Selection-oriented actions are meaningless for clipboard text, so they're hidden.
+The global toggle shortcut ([`HotkeyManager`](../../Sources/OpenClip/Platform/HotkeyManager.swift)) can use the current clipboard text when the frontmost app yields no selection. An eligible mouse hold can also use clipboard text when the cursor is an I-beam and the app policy permits paste. Both mark the context with `SelectionContext.isClipboardFallback`. The registry hides actions that require a live selection, including Copy and Cut.
 
 ---
 
 ## Privacy & Non-Destructive Guarantees
 
-- **No Clipboard Pollution (AX modes)**: `ax-text-control`, `ax-web-area`, and `browser-script` never write to `NSPasteboard` — they read the live accessibility tree or the browser's AppleScript bridge.
+- **AX selection reads** use the live accessibility tree. The coordinator can fall back to keyboard copy or use it to collect missing rich text from a web selection.
 - **Copy modes are archive-and-restore**: `menu-copy`/`keyboard-copy` temporarily place the selected text on the general pasteboard, then restore the archived items tagged with the nspasteboard transient markers so clipboard managers don't treat the restore as a user copy.
 - **Ignored Fields**: Secure text fields (such as password inputs or masked text areas) do not expose `kAXSelectedTextAttribute` through AX APIs, ensuring password security.

@@ -291,12 +291,6 @@ public final class ActionCoordinator: ObservableObject, Sendable {
         saveAndApplyGroupDefs()
     }
 
-    public func reset() {
-        actionGroupDefs = []
-        registry.setGroupDefs([])
-        settingsStore.set(.actionGroups, value: nil)
-    }
-
     private func saveGroupDefs(_ defs: [ActionGroupDef]) {
         let data = try? ActionGroupDef.encode(defs)
         settingsStore.set(.actionGroups, value: data)

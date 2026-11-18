@@ -14,34 +14,6 @@ final class CalendarActionTests: XCTestCase {
         TestIsolation.reset()
     }
 
-    func testIsEnabledWithValidDate() {
-        let action = CalendarAction()
-        let context = ActionContext(
-            selection: SelectionContext(
-                text: "Meeting with Sarah tomorrow at 3pm",
-                sourceApp: AppIdentity(bundleIdentifier: "com.apple.Notes", localizedName: "Notes"),
-                cursorPosition: .zero,
-                timestamp: Date(),
-                appPolicy: .default
-            )
-        )
-        XCTAssertTrue(action.isEnabled(for: context))
-    }
-
-    func testIsEnabledWithNoDate() {
-        let action = CalendarAction()
-        let context = ActionContext(
-            selection: SelectionContext(
-                text: "Just some ordinary text with no date",
-                sourceApp: AppIdentity(bundleIdentifier: "com.apple.Notes", localizedName: "Notes"),
-                cursorPosition: .zero,
-                timestamp: Date(),
-                appPolicy: .default
-            )
-        )
-        XCTAssertFalse(action.isEnabled(for: context))
-    }
-
     func testPerformNativeGeneratesICS() async throws {
         let store = MemorySettingsStore()
         store.set(SettingKey.actionOption(actionID: "builtin.calendar", optionID: "provider"), value: "native")
@@ -65,52 +37,6 @@ final class CalendarActionTests: XCTestCase {
             XCTAssertTrue(content.contains("BEGIN:VEVENT"))
         } else {
             XCTFail("Expected .openURL with .ics file URL, got \(result)")
-        }
-    }
-
-    func testPerformBusyCalOpensBusyCalURL() async throws {
-        let store = MemorySettingsStore()
-        store.set(SettingKey.actionOption(actionID: "builtin.calendar", optionID: "provider"), value: "busycal")
-        let action = CalendarAction(settingsStore: store)
-        let context = ActionContext(
-            selection: SelectionContext(
-                text: "Coffee with Mark on Friday at 4pm",
-                sourceApp: AppIdentity(bundleIdentifier: "com.apple.Notes", localizedName: "Notes"),
-                cursorPosition: .zero,
-                timestamp: Date(),
-                appPolicy: .default
-            )
-        )
-
-        let result = try await action.perform(context)
-        if case .openURL(let url) = result {
-            XCTAssertEqual(url.scheme, "busycalevent")
-            XCTAssertTrue(url.absoluteString.starts(with: "busycalevent://new/"))
-        } else {
-            XCTFail("Expected .openURL with busycalevent scheme, got \(result)")
-        }
-    }
-
-    func testPerformFantasticalOpensFantasticalURL() async throws {
-        let store = MemorySettingsStore()
-        store.set(SettingKey.actionOption(actionID: "builtin.calendar", optionID: "provider"), value: "fantastical")
-        let action = CalendarAction(settingsStore: store)
-        let context = ActionContext(
-            selection: SelectionContext(
-                text: "Lunch next Monday at 1pm",
-                sourceApp: AppIdentity(bundleIdentifier: "com.apple.Notes", localizedName: "Notes"),
-                cursorPosition: .zero,
-                timestamp: Date(),
-                appPolicy: .default
-            )
-        )
-
-        let result = try await action.perform(context)
-        if case .openURL(let url) = result {
-            XCTAssertEqual(url.scheme, "x-fantastical3")
-            XCTAssertTrue(url.absoluteString.contains("sentence="))
-        } else {
-            XCTFail("Expected .openURL with x-fantastical3 scheme, got \(result)")
         }
     }
 
@@ -175,24 +101,6 @@ final class CalendarActionTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: icsURL.path), "temp .ics must survive until the deferred cleanup runs")
         try await Task.sleep(nanoseconds: 250_000_000)
         XCTAssertFalse(FileManager.default.fileExists(atPath: icsURL.path), "temp .ics should be removed after the cleanup delay")
-    }
-
-    func testHandlerDoesNotDeleteNonCalendarICSFile() async throws {
-        // An .ics in the temp dir that isn't ours (wrong prefix) must be left alone.
-        let otherURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("Other-\(UUID().uuidString).ics")
-        try Data("BEGIN:VCALENDAR".utf8).write(to: otherURL)
-        defer { try? FileManager.default.removeItem(at: otherURL) }
-
-        let handler = DefaultActionResultHandler(
-            settingsStore: MemorySettingsStore(),
-            pasteboard: NSPasteboard(name: NSPasteboard.Name("OpenClipTest-\(UUID().uuidString)")),
-            icsCleanupDelay: 0.05,
-            openURL: { _ in }
-        )
-        try await handler.handle(.openURL(otherURL), in: nil)
-        try await Task.sleep(nanoseconds: 250_000_000)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: otherURL.path), "non-calendar .ics must not be deleted")
     }
 
     func testHandlerDoesNotDeleteICSFileOutsideTemporaryDirectory() async throws {

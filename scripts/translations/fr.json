@@ -225,6 +225,8 @@
   "Rewrite to improve clarity, flow, and vocabulary while keeping the original meaning and language": "Réécrire pour améliorer la clarté, la fluidité et le vocabulaire tout en conservant le sens et la langue d’origine",
   "Summarize": "Résumer",
   "Provide a concise bulleted summary capturing the key points": "Fournir un résumé concis sous forme de liste à puces reprenant les points clés",
+  "Could not remove the saved API key.": "Impossible de supprimer la clé API enregistrée.",
+  "Could not save the API key.": "Impossible d’enregistrer la clé API.",
   "Explain": "Expliquer",
   "Explain the core concept clearly and concisely in simple terms": "Expliquer le concept principal de manière claire, concise et en termes simples",
   "Translate": "Traduire",
@@ -427,5 +429,11 @@
   "Paused in %@": "En pause dans %@",
   "Pause in App": "Mettre en pause dans l'application",
   "Resume OpenClip (%lldm left)": "Reprendre OpenClip (%lld min restantes)",
-  "Personal build. Install updates manually.": "Version personnelle. Installez les mises à jour manuellement."
+  "Personal build. Install updates manually.": "Version personnelle. Installez les mises à jour manuellement.",
+  "Menu Layout": "Disposition du menu",
+  "Horizontal": "Horizontal",
+  "Radial": "Circulaire",
+  "Choose an action": "Choisir une action",
+  "Radial menus open around the pointer. Move into a sector, then click.": "Le menu circulaire s’ouvre autour du pointeur. Placez-le dans un secteur, puis cliquez.",
+  "Search and analyze, then ELI25. Explain concisely in Chinese:": "Rechercher et analyser, puis ELI25. Expliquer brièvement en chinois :"
 }

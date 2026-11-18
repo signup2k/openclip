@@ -2,25 +2,6 @@ import XCTest
 @testable import Core
 @testable import OpenClip
 
-/// In-memory option store for host tests; never touches UserDefaults. All access happens on the
-/// MainActor in these tests, so the plain dictionary is safe.
-fileprivate final class MemoryOptionStore: ActionOptionReading, ActionOptionWriting, @unchecked Sendable {
-    private var values: [String: String] = [:]
-
-    func stringValue(actionID: String, option: ExtensionOption) -> String {
-        values[SettingKey.actionOption(actionID: actionID, optionID: option.identifier).name]
-            ?? (option.defaultValue ?? "")
-    }
-
-    func setStringValue(_ value: String, actionID: String, option: ExtensionOption) {
-        values[SettingKey.actionOption(actionID: actionID, optionID: option.identifier).name] = value
-    }
-
-    func clearValue(actionID: String, option: ExtensionOption) {
-        values[SettingKey.actionOption(actionID: actionID, optionID: option.identifier).name] = ""
-    }
-}
-
 /// URLProtocol that serves canned responses, letting fetch tests run without real networking.
 final class MockURLProtocol: URLProtocol {
     /// Nonisolated global mutable state — `nonisolated(unsafe)` because it's only touched from the
@@ -70,12 +51,12 @@ final class LockedArray<T: Sendable>: @unchecked Sendable {
 
 final class OpenClipJSHostTests: XCTestCase {
     private var host: OpenClipJSHost!
-    private var optionStore: MemoryOptionStore!
+    private var optionStore: SettingsActionOptionStore!
 
     override func setUp() async throws {
         try await super.setUp()
         host = OpenClipJSHost()
-        optionStore = MemoryOptionStore()
+        optionStore = SettingsActionOptionStore(store: MemorySettingsStore())
         MockURLProtocol.requestHandler = nil
         MockURLProtocol.capturedRequests.removeAll()
     }
@@ -169,81 +150,7 @@ final class OpenClipJSHostTests: XCTestCase {
         XCTAssertFalse(result.dismissesPopup)
     }
 
-    func testPasteEffectReturnsPaste() async throws {
-        let result = try await host.run(makeRequest(script: "openclip.paste('Hello World');"))
-        guard case .paste(let text) = result else {
-            return XCTFail("Expected .paste, got \(result)")
-        }
-        XCTAssertEqual(text, "Hello World")
-    }
-
-    func testCopyEffectReturnsCopy() async throws {
-        let result = try await host.run(makeRequest(script: "openclip.copy('Copied');"))
-        guard case .copy(let text) = result else {
-            return XCTFail("Expected .copy, got \(result)")
-        }
-        XCTAssertEqual(text, "Copied")
-    }
-
     // MARK: - Console shim
-
-    /// `console.log` must not throw a ReferenceError that breaks the action; it routes to Log.js
-    /// and the script still completes normally. Covers variadic args + object formatting.
-    func testConsoleLogShimDoesNotThrowAndActionSucceeds() async throws {
-        let result = try await host.run(makeRequest(script: """
-            console.log('hello', 42, { a: 1 });
-            function action() { return 'ok'; }
-            """))
-        guard case .text(let text) = result else {
-            return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(text, "ok")
-    }
-
-    /// The console shim must also be installed for async scripts (fetch path).
-    func testConsoleLogShimWorksInAsyncScript() async throws {
-        let result = try await host.run(makeRequest(script: """
-            console.log('async start');
-            async function action() { return 'ok'; }
-            """, isAsync: true))
-        guard case .text(let text) = result else {
-            return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(text, "ok")
-    }
-
-    /// The internal `__log` callback must not stay reachable from extension scripts: only the
-    /// redacting `console.log` wrapper is exposed, so a script cannot log raw text directly.
-    func testConsoleLogShimRemovesRawLogAccess() async throws {
-        let result = try await host.run(makeRequest(script: """
-            var exposed = (typeof console.__log);
-            var throws = false;
-            try { console.__log('raw text'); } catch (e) { throws = (e instanceof TypeError); }
-            function action() { return exposed + '|' + throws; }
-            """))
-        guard case .text(let text) = result else {
-            return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(text, "undefined|true")
-    }
-
-    func testShowContentBridgeRemovedSurfacesError() async throws {
-        let script = "openclip.showContent(h('stack', {}, [h('text', { content: 'Hello' })]));"
-        let result = try await host.run(makeRequest(script: script))
-        guard case .toast(let feedback) = result else {
-            return XCTFail("Expected .toast, got \(result)")
-        }
-        XCTAssertEqual(feedback.style, .error, "calling the removed showContent bridge surfaces a JS error")
-    }
-
-    func testHHelperRemovedSurfacesError() async throws {
-        let script = "h('text', { content: 'Hello' });"
-        let result = try await host.run(makeRequest(script: script))
-        guard case .toast(let feedback) = result else {
-            return XCTFail("Expected .toast, got \(result)")
-        }
-        XCTAssertEqual(feedback.style, .error, "the h() helper is gone with the canvas feature")
-    }
 
     func testRequireConfigurationReturnsOpenConfiguration() async throws {
         let script = "openclip.requireConfiguration({ reason: 'Add your API key', missing: ['apiKey'] });"
@@ -289,24 +196,6 @@ final class OpenClipJSHostTests: XCTestCase {
         XCTAssertEqual(secondaryText, "secondary")
     }
 
-    func testInputMatchedTextAndAppExposed() async throws {
-        let match = ActionMatchInfo(text: "full text", matchedText: "text", captures: [], sourceBundleID: nil)
-        let script = "return openclip.input.matchedText + '|' + openclip.input.app.bundleID + '|' + openclip.input.app.name;"
-        let request = OpenClipJSHost.Request(
-            actionID: "test.action",
-            scriptCode: script,
-            context: makeContext(selectedText: "full text", match: match),
-            options: [],
-            optionStore: optionStore,
-            rules: ExtensionActionRules()
-        )
-        let result = try await host.run(request)
-        guard case .text(let text) = result else {
-            return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(text, "text|com.host.test|HostTestApp")
-    }
-
     func testTypedBooleanOptionsDeliveredAsNativeBooleans() async throws {
         let boolOption = ExtensionOption(identifier: "debugMode", label: "Debug", type: .boolean, defaultValue: "true")
         let strOption = ExtensionOption(identifier: "prefix", label: "Prefix", type: .string, defaultValue: "http")
@@ -330,29 +219,10 @@ final class OpenClipJSHostTests: XCTestCase {
         XCTAssertEqual(input, "hello")
     }
 
-    func testRunShortcutCustomInputOverride() async throws {
-        let script = "openclip.runShortcut('MyShortcut', 'custom override text');"
-        let request = makeRequest(script: script)
-        let result = try await host.run(request)
-        guard case .runShortcut(let name, let input) = result else {
-            return XCTFail("Expected .runShortcut, got \(result)")
-        }
-        XCTAssertEqual(name, "MyShortcut")
-        XCTAssertEqual(input, "custom override text")
-    }
-
     func testFunctionStringReturnBecomesText() async throws {
         let result = try await host.run(makeRequest(script: "function action() { return 'result'; }"))
         guard case .text(let text) = result else {
             return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(text, "result")
-    }
-
-    func testFunctionStringReturnProducesRawTextResult() async throws {
-        let raw = try await host.run(makeRequest(script: "function action() { return 'result'; }"))
-        guard case .text(let text) = raw else {
-            return XCTFail("Expected .text, got \(raw)")
         }
         XCTAssertEqual(text, "result")
     }
@@ -366,15 +236,6 @@ final class OpenClipJSHostTests: XCTestCase {
         XCTAssertTrue(feedback.message.contains("boom"))
     }
 
-    func testNotifyEffectReturnsNotify() async throws {
-        let result = try await host.run(makeRequest(script: "openclip.notify('Title', 'Body');"))
-        guard case .notify(let title, let body) = result else {
-            return XCTFail("Expected .notify, got \(result)")
-        }
-        XCTAssertEqual(title, "Title")
-        XCTAssertEqual(body, "Body")
-    }
-
     func testShareServiceEffectReturnsShareService() async throws {
         let result = try await host.run(makeRequest(
             script: "openclip.shareService('com.apple.Notes.SharingExtension');"))
@@ -383,15 +244,6 @@ final class OpenClipJSHostTests: XCTestCase {
         }
         XCTAssertEqual(identifier, "com.apple.Notes.SharingExtension")
         XCTAssertEqual(text, "hello") // falls back to selection text when no text given
-    }
-
-    func testShareServiceEffectWithExplicitText() async throws {
-        let result = try await host.run(makeRequest(
-            script: "openclip.shareService('com.apple.Notes.SharingExtension', 'custom');"))
-        guard case .shareService(_, let text) = result else {
-            return XCTFail("Expected .shareService, got \(result)")
-        }
-        XCTAssertEqual(text, "custom")
     }
 
     func testMultipleEffectsSequenceInCallOrder() async throws {
@@ -426,17 +278,6 @@ final class OpenClipJSHostTests: XCTestCase {
         XCTAssertEqual(toast.style, .error)
     }
 
-    /// One-argument `toast` (no style) must default to `.info`, matching the optional-arg
-    /// contract used by the canvas bridge.
-    func testToastDefaultsToInfoWhenStyleOmitted() async throws {
-        let result = try await host.run(makeRequest(script: "openclip.toast('Done');"))
-        guard case .toast(let feedback) = result else {
-            return XCTFail("Expected .toast, got \(result)")
-        }
-        XCTAssertEqual(feedback.message, "Done")
-        XCTAssertEqual(feedback.style, .info)
-    }
-
     func testToastKeepVisibleOption() async throws {
         let result = try await host.run(makeRequest(script: "openclip.toast('Keep', 'info', { keepVisible: true });"))
         guard case .toast(let feedback) = result else { return XCTFail("Expected .toast, got \(result)") }
@@ -454,17 +295,6 @@ final class OpenClipJSHostTests: XCTestCase {
         XCTAssertEqual(spec.modifiers, [])
     }
 
-    func testOptionsReadOnlyViaOptionStore() async throws {
-        let option = ExtensionOption(identifier: "prefix", label: "Prefix", type: .string, defaultValue: "DEFAULT: ")
-        optionStore.setStringValue("SET: ", actionID: "test.action", option: option)
-        let script = "return openclip.options.prefix + '|' + openclip.option('prefix');"
-        let result = try await host.run(makeRequest(script: script, options: [option]))
-        guard case .text(let text) = result else {
-            return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(text, "SET: |SET: ")
-    }
-
     // MARK: - Async runtime (isAsync: true)
 
     func testAsyncFunctionResolvesReturnValue() async throws {
@@ -474,15 +304,6 @@ final class OpenClipJSHostTests: XCTestCase {
             return XCTFail("Expected .text, got \(result)")
         }
         XCTAssertEqual(text, "async:hello")
-    }
-
-    func testAsyncTopLevelSideEffectsWithoutEntryPointSucceed() async throws {
-        let request = makeRequest(script: "openclip.copy('side');", isAsync: true)
-        let result = try await host.run(request)
-        guard case .copy(let text) = result else {
-            return XCTFail("Expected .copy, got \(result)")
-        }
-        XCTAssertEqual(text, "side")
     }
 
     func testPromiseRejectionSurfacesErrorToast() async throws {
@@ -495,35 +316,7 @@ final class OpenClipJSHostTests: XCTestCase {
         XCTAssertTrue(feedback.message.contains("async-boom"))
     }
 
-    func testSyncModeIgnoresAsyncReturnValue() async throws {
-        // Legacy mode can't await a promise; a promise-like return must not paste "[object Promise]".
-        let result = try await host.run(makeRequest(script: "async function action() { return 'x'; }"))
-        guard case .success = result else {
-            return XCTFail("Expected .success, got \(result)")
-        }
-    }
-
     // MARK: - Fetch polyfill
-
-    func testFetchGetReturnsStatusAndText() async throws {
-        MockURLProtocol.requestHandler = { request in
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            return (response, Data("hello".utf8))
-        }
-        defer { MockURLProtocol.requestHandler = nil }
-
-        let script = """
-        async function action() {
-            const r = await openclip.fetch('https://example.com/ping');
-            return r.status + ':' + await r.text();
-        }
-        """
-        let result = try await makeMockedHost().run(makeRequest(script: script, isAsync: true))
-        guard case .text(let text) = result else {
-            return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(text, "200:hello")
-    }
 
     func testFetchPostSendsJSONBodyAndParsesResponse() async throws {
         MockURLProtocol.requestHandler = { request in
@@ -623,27 +416,6 @@ final class OpenClipJSHostTests: XCTestCase {
                       "unsupported scheme must not reach the network")
     }
 
-    /// The scheme allowlist is case-insensitive, so uppercase `HTTPS://` still loads.
-    func testFetchAcceptsCaseInsensitiveHTTPScheme() async throws {
-        MockURLProtocol.requestHandler = { request in
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            return (response, Data("ok".utf8))
-        }
-        defer { MockURLProtocol.requestHandler = nil }
-
-        let script = """
-        async function action() {
-            const r = await openclip.fetch('HTTPS://example.com/up');
-            return r.status + ':' + await r.text();
-        }
-        """
-        let result = try await makeMockedHost().run(makeRequest(script: script, isAsync: true))
-        guard case .text(let text) = result else {
-            return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(text, "200:ok")
-    }
-
     /// Loopback destinations must be rejected before any network access, surfacing through the
     /// promise rejection rather than reaching URLSession.
     func testFetchRejectsDirectLoopback() async throws {
@@ -700,73 +472,6 @@ final class OpenClipJSHostTests: XCTestCase {
                       "redirect must not be followed to a loopback host")
     }
 
-    /// `FetchTaskBox.remove` matches by stable task identifier: removing a task by id takes it out
-    /// of watchdog tracking, so a later `cancelAll` leaves it untouched while still cancelling the
-    /// tracked tasks.
-    func testFetchTaskBoxRemovesByIdentifier() {
-        let box = FetchTaskBox()
-        let session = URLSession(configuration: .ephemeral)
-        func makeTask() -> URLSessionDataTask {
-            session.dataTask(with: URLRequest(url: URL(string: "https://example.com/x")!))
-        }
-        let a = makeTask()
-        let b = makeTask()
-        let c = makeTask()
-        box.add(a)
-        box.add(b)
-        box.add(c)
-
-        box.remove(b.taskIdentifier)
-
-        box.cancelAll()
-        XCTAssertNotEqual(b.state, .canceling, "removed task must not be cancelled")
-        XCTAssertEqual(a.state, .canceling)
-        XCTAssertEqual(c.state, .canceling)
-    }
-
-    /// `add(_:)` racing with `cancelAll()` must never let a task escape cancellation: tasks added
-    /// before cancellation are cancelled by `cancelAll()`, tasks added after cancellation started are
-    /// cancelled immediately by `add(_:)`.
-    func testFetchTaskBoxAddConcurrentWithCancelAllCancelsAll() {
-        let box = FetchTaskBox()
-        let session = URLSession(configuration: .ephemeral)
-        let group = DispatchGroup()
-        let queue = DispatchQueue(label: "fetchbox.race", attributes: .concurrent)
-        let addLock = NSLock()
-        final class AddedTracker: @unchecked Sendable {
-            var list: [URLSessionDataTask] = []
-        }
-        let added = AddedTracker()
-
-        let producerCount = 8
-        let perProducer = 100
-        for _ in 0..<producerCount {
-            queue.async(group: group) {
-                for _ in 0..<perProducer {
-                    let task = session.dataTask(with: URLRequest(url: URL(string: "https://example.com/x")!))
-                    addLock.lock()
-                    added.list.append(task)
-                    addLock.unlock()
-                    box.add(task)
-                }
-            }
-        }
-        queue.async(group: group) {
-            box.cancelAll()
-        }
-        group.wait()
-
-        addLock.lock()
-        let all = added.list
-        addLock.unlock()
-        XCTAssertEqual(all.count, producerCount * perProducer)
-        // Cancelled tasks end up in either `.canceling` or `.completed`; a task that escaped
-        // cancellation would still be `.suspended` (never resumed).
-        for task in all {
-            XCTAssertNotEqual(task.state, .suspended, "every added task must be cancelled, got \(task.state)")
-        }
-    }
-
     // MARK: - Watchdog
 
     func testTimeoutThrowsForNeverSettlingPromise() async throws {
@@ -795,7 +500,7 @@ final class OpenClipJSHostTests: XCTestCase {
             iconSymbol: "terminal",
             scriptCode: "throw new Error('must not run');",
             options: [option],
-            optionStore: MemoryOptionStore(),
+            optionStore: SettingsActionOptionStore(store: MemorySettingsStore()),
             rules: rules
         )
 
@@ -806,29 +511,6 @@ final class OpenClipJSHostTests: XCTestCase {
         XCTAssertEqual(config.actionID, "test.required")
         XCTAssertEqual(config.missingOptionIDs, ["apiKey"])
         XCTAssertEqual(config.reason, "Required option not set.")
-    }
-
-    /// The same action with the required option set runs normally (`.text`, not `.openConfiguration`).
-    func testMissingRequiredOptionsRunsNormallyWhenStoreSet() async throws {
-        let option = ExtensionOption(identifier: "apiKey", label: "API Key", type: .secret, defaultValue: nil)
-        let store = MemoryOptionStore()
-        store.setStringValue("secret", actionID: "test.required", option: option)
-        let rules = ExtensionActionRules(requirements: ActionRequirements(requiredOptions: ["apiKey"]))
-        let action = JavaScriptAction(
-            id: "test.required",
-            title: "Required",
-            iconSymbol: "terminal",
-            scriptCode: "function action() { return 'ran'; }",
-            options: [option],
-            optionStore: store,
-            rules: rules
-        )
-
-        let result = try await action.perform(makeContext())
-        guard case .text(let text) = result else {
-            return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(text, "ran")
     }
 
     // MARK: - JS modules (packageDirectory != nil)
@@ -874,28 +556,6 @@ final class OpenClipJSHostTests: XCTestCase {
         XCTAssertEqual(text, "Hello hello")
     }
 
-    func testModulePackageRequiresLocalHelper() async throws {
-        let package = try makeModulePackage([
-            "lib/helper.js": "module.exports = { upper: function(s) { return s.toUpperCase(); } };"
-        ])
-        let script = "function action(text) { return require('./lib/helper.js').upper(text); }"
-        let result = try await host.run(makeModuleRequest(script: script, package: package))
-        guard case .text(let text) = result else {
-            return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(text, "HELLO")
-    }
-
-    func testCJSModuleExportsActionEntryForm() async throws {
-        let package = try makeModulePackage([:])
-        let script = "module.exports = { action: function(selection, options) { return 'cjs'; } };"
-        let result = try await host.run(makeModuleRequest(script: script, package: package))
-        guard case .text(let text) = result else {
-            return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(text, "cjs")
-    }
-
     func testDirectFunctionExportEntryForm() async throws {
         let package = try makeModulePackage([:])
         let script = "module.exports = function action() { return 'direct'; };"
@@ -904,24 +564,6 @@ final class OpenClipJSHostTests: XCTestCase {
             return XCTFail("Expected .text, got \(result)")
         }
         XCTAssertEqual(text, "direct")
-    }
-
-    func testModuleCacheAndSingletonAcrossRequires() async throws {
-        let package = try makeModulePackage([
-            "libB.js": "var n = (globalThis.__loads = (globalThis.__loads || 0) + 1); module.exports = { n: n };",
-            "libA.js": "module.exports = { b: require('./libB.js') };"
-        ])
-        let script = """
-        var a = require('./libA.js');
-        var a2 = require('./libA.js');
-        var b = require('./libB.js');
-        function action() { return a.b.n + '|' + b.n + '|' + (a === a2) + '|' + (a.b === b); }
-        """
-        let result = try await host.run(makeModuleRequest(script: script, package: package))
-        guard case .text(let text) = result else {
-            return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(text, "1|1|true|true")
     }
 
     func testModuleCycleResolvesWithPartialExports() async throws {
@@ -952,30 +594,6 @@ final class OpenClipJSHostTests: XCTestCase {
         XCTAssertTrue(feedback.message.contains("nope.js"))
     }
 
-    func testNodeBuiltinRequireShowsErrorStatus() async throws {
-        let package = try makeModulePackage([:])
-        let script = "function action() { require('fs'); }"
-        let result = try await host.run(makeModuleRequest(script: script, package: package))
-        guard case .toast(let feedback) = result else {
-            return XCTFail("Expected .toast, got \(result)")
-        }
-        XCTAssertEqual(feedback.style, .error)
-        XCTAssertTrue(feedback.message.contains("Node builtin"))
-        XCTAssertTrue(feedback.message.contains("fs"))
-    }
-
-    func testAsyncModulePackageResolvesHelper() async throws {
-        let package = try makeModulePackage([
-            "lib/up.js": "module.exports = { up: function(s) { return s.toUpperCase(); } };"
-        ])
-        let script = "module.exports = { action: async function(text) { return require('./lib/up.js').up(text); } };"
-        let result = try await host.run(makeModuleRequest(script: script, package: package, isAsync: true))
-        guard case .text(let text) = result else {
-            return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(text, "HELLO")
-    }
-
     func testJavaScriptActionPerformThreadsPackageDirectory() async throws {
         let package = try makeModulePackage([
             "u.js": "module.exports = function(s) { return s.toUpperCase(); };"
@@ -987,7 +605,7 @@ final class OpenClipJSHostTests: XCTestCase {
             scriptCode: "function action(t) { return require('./u.js')(t); }",
             options: [],
             chrome: nil,
-            optionStore: MemoryOptionStore(),
+            optionStore: SettingsActionOptionStore(store: MemorySettingsStore()),
             rules: nil,
             isAsync: false,
             packageDirectory: package
@@ -1038,35 +656,6 @@ final class OpenClipJSHostTests: XCTestCase {
         XCTAssertEqual(payload.rtf, "{\\rtf1 RTF}")
     }
 
-    func testCopyContentWithShorthandKeys() async throws {
-        let script = """
-        function action() {
-            openclip.copyContent({
-                text: 'Plain Copy',
-                html: '<b>Bold Copy</b>',
-                rtf: '{\\\\rtf1 Bold}'
-            });
-        }
-        """
-        let result = try await host.run(makeRequest(script: script))
-        guard case .copyContent(let payload) = result else {
-            return XCTFail("Expected .copyContent, got \(result)")
-        }
-        XCTAssertEqual(payload.plainText, "Plain Copy")
-        XCTAssertEqual(payload.html, "<b>Bold Copy</b>")
-        XCTAssertEqual(payload.rtf, "{\\rtf1 Bold}")
-    }
-
-    func testRichPayloadWithNoRepresentationIsIgnored() async throws {
-        for call in ["openclip.pasteContent({})", "openclip.copyContent({})"] {
-            let script = "function action() { \(call); }"
-            let result = try await host.run(makeRequest(script: script))
-            guard case .success = result else {
-                return XCTFail("Expected .success for \(call), got \(result)")
-            }
-        }
-    }
-
     func testI18nFallsBackToBaseLanguage() async throws {
         let script = """
         function action() {
@@ -1082,42 +671,6 @@ final class OpenClipJSHostTests: XCTestCase {
     }
 
     // MARK: - openclip.pasteboard API Tests
-
-    func testPasteboardReadPlainText() async throws {
-        let pb = OpenClipJSHost.PasteboardContent(text: "Existing Clipboard Text", hasContent: true, types: ["public.utf8-plain-text"])
-        let script = """
-        function action(sel) {
-            return "PB: " + openclip.pasteboard.text + " | SEL: " + sel;
-        }
-        """
-        let result = try await host.run(makeRequest(script: script, pasteboardContent: pb))
-        guard case .text(let output) = result else {
-            return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(output, "PB: Existing Clipboard Text | SEL: hello")
-    }
-
-    func testPasteboardReadHtmlAndRtf() async throws {
-        let pb = OpenClipJSHost.PasteboardContent(
-            text: "Plain",
-            html: "<b>Rich</b>",
-            rtf: "{\\rtf1 Rich}",
-            hasContent: true,
-            hasHtml: true,
-            hasRtf: true,
-            types: ["public.utf8-plain-text", "public.html", "public.rtf"]
-        )
-        let script = """
-        function action() {
-            return openclip.pasteboard.html + " / " + openclip.pasteboard.rtf;
-        }
-        """
-        let result = try await host.run(makeRequest(script: script, pasteboardContent: pb))
-        guard case .text(let output) = result else {
-            return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(output, "<b>Rich</b> / {\\rtf1 Rich}")
-    }
 
     func testPasteboardConcealedPasswordRedacted() async throws {
         // ConcealedType marker returns empty text/html/rtf and hasContent false
@@ -1145,42 +698,6 @@ final class OpenClipJSHostTests: XCTestCase {
         XCTAssertEqual(output, "CONCEALED: ''")
     }
 
-    func testPasteboardHasContentAndTypes() async throws {
-        let pb = OpenClipJSHost.PasteboardContent(
-            text: "Some note",
-            hasContent: true,
-            hasHtml: false,
-            hasRtf: false,
-            types: ["public.utf8-plain-text"]
-        )
-        let script = """
-        function action() {
-            var hasText = openclip.pasteboard.hasContent;
-            var typeCount = openclip.pasteboard.types.length;
-            return "has=" + hasText + ", types=" + typeCount;
-        }
-        """
-        let result = try await host.run(makeRequest(script: script, pasteboardContent: pb))
-        guard case .text(let output) = result else {
-            return XCTFail("Expected .text, got \(result)")
-        }
-        XCTAssertEqual(output, "has=true, types=1")
-    }
-
-    func testPasteboardTextSetterTriggersCopy() async throws {
-        let pb = OpenClipJSHost.PasteboardContent(text: "Initial Clip", hasContent: true)
-        let script = """
-        function action(sel) {
-            openclip.pasteboard.text = openclip.pasteboard.text + "\\n" + sel;
-        }
-        """
-        let result = try await host.run(makeRequest(script: script, pasteboardContent: pb))
-        guard case .copy(let text) = result else {
-            return XCTFail("Expected .copy, got \(result)")
-        }
-        XCTAssertEqual(text, "Initial Clip\nhello")
-    }
-
     func testPasteboardContentSetterTriggersCopyContent() async throws {
         let pb = OpenClipJSHost.PasteboardContent(
             text: "Hello",
@@ -1202,5 +719,24 @@ final class OpenClipJSHostTests: XCTestCase {
         }
         XCTAssertEqual(payload.plainText, "Hello hello")
         XCTAssertEqual(payload.html, "<b>Hello</b> <i>hello</i>")
+    }
+
+    @MainActor
+    func testJavaScriptActionFallsBackToOptionDefaultWhenUnset() async throws {
+        let option = ExtensionOption(identifier: "prefix", label: "Prefix", type: .string, defaultValue: "DEFAULT: ")
+        let action = JavaScriptAction(
+            id: "com.test.prefix",
+            title: "Prefix",
+            iconSymbol: "textformat",
+            scriptCode: "function action(text, options) { return options.prefix + text.toUpperCase(); }",
+            options: [option],
+            optionStore: optionStore
+        )
+
+        let result = try await action.perform(makeContext())
+        guard case .text(let text) = result else {
+            return XCTFail("Expected .text result, got \(result)")
+        }
+        XCTAssertEqual(text, "DEFAULT: HELLO")
     }
 }

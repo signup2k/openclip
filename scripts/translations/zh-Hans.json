@@ -225,6 +225,8 @@
   "Rewrite to improve clarity, flow, and vocabulary while keeping the original meaning and language": "在保持原意和语言的前提下，提升清晰度、流畅度和用词",
   "Summarize": "总结",
   "Provide a concise bulleted summary capturing the key points": "用简洁的条目概括要点",
+  "Could not remove the saved API key.": "无法删除已保存的 API 密钥。",
+  "Could not save the API key.": "无法保存 API 密钥。",
   "Explain": "解释",
   "Explain the core concept clearly and concisely in simple terms": "用简单的语言清晰、简洁地解释核心概念",
   "Translate": "翻译",
@@ -427,5 +429,11 @@
   "Paused in %@": "已在 %@ 中暂停",
   "Pause in App": "在应用中暂停",
   "Resume OpenClip (%lldm left)": "恢复 OpenClip (剩余 %lld 分钟)",
-  "Personal build. Install updates manually.": "个人版本，请手动安装更新。"
+  "Personal build. Install updates manually.": "个人版本，请手动安装更新。",
+  "Menu Layout": "菜单布局",
+  "Horizontal": "横向",
+  "Radial": "圆盘",
+  "Choose an action": "选择动作",
+  "Radial menus open around the pointer. Move into a sector, then click.": "圆盘菜单以鼠标为中心弹出。移入扇区后，点击执行。",
+  "Search and analyze, then ELI25. Explain concisely in Chinese:": "搜索、分析后，ELI25，用中文简洁解释："
 }

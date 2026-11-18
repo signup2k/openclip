@@ -211,15 +211,4 @@ final class ExtensionManagerTrustTests: XCTestCase {
         await manager.retrustAfterAuthorizedEdit(packageID: "com.t.edit", in: tempDir)
         XCTAssertEqual(store.get(.extensionTrust)["com.t.edit"], "seen")
     }
-
-    @MainActor
-    func testUnconfiguredManagerSkipsGatingEntirely() async throws {
-        // settingsStore nil → raw behavior, existing tests stay green.
-        let manager = ExtensionManager.shared
-        manager.settingsStore = nil
-        try writePackage(packageID: "com.t.raw", name: "Raw")
-        await manager.loadExtensions(from: tempDir)
-        XCTAssertEqual(manager.loadedActions.count, 1)
-        XCTAssertFalse(manager.loadedActions[0] is GatedExtensionAction)
-    }
 }

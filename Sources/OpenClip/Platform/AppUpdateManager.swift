@@ -241,16 +241,4 @@ public final class AppUpdateManager: NSObject, ObservableObject, SPUUpdaterDeleg
             }
         }
     }
-
-    // MARK: - Testing Hooks
-
-    public func setAvailableUpdateVersionForTesting(
-        _ version: String?,
-        releaseNotes: String? = nil,
-        isStagedForQuit: Bool = false
-    ) {
-        self.availableUpdateVersion = version
-        self.availableUpdateReleaseNotes = releaseNotes
-        self.isUpdateStagedForQuitInstall = isStagedForQuit
-    }
 }

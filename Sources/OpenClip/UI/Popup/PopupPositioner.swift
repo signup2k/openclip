@@ -18,9 +18,13 @@ public struct PopupPositioner: Sendable {
         popupSize: CGSize,
         in screenBounds: CGRect,
         alignment: PopupBarAlignment = .left,
-        verticalPosition: PopupVerticalPosition = .auto
+        verticalPosition: PopupVerticalPosition = .auto,
+        layout: PopupLayoutStyle = .horizontal
     ) -> CGRect {
-        placeNearReleasePoint(
+        if layout == .radial {
+            return placeAroundCursor(context.cursorPosition, popupSize: popupSize, screenBounds: screenBounds)
+        }
+        return placeNearReleasePoint(
             releasePoint: context.cursorPosition,
             mouseDownPoint: context.mouseDownLocation,
             popupSize: popupSize,
@@ -28,6 +32,31 @@ public struct PopupPositioner: Sendable {
             alignment: alignment,
             verticalPosition: verticalPosition
         )
+    }
+
+    /// A radial menu starts with the cursor in its neutral hub. Clamp both axes on every
+    /// display, including displays with a negative origin, so no sector ends up off-screen.
+    public static func placeAroundCursor(_ cursor: CGPoint, popupSize: CGSize, screenBounds: CGRect) -> CGRect {
+        let padding = PopupMetrics.popupPadding
+        let size = CGSize(width: min(popupSize.width, max(0, screenBounds.width - 2 * padding)),
+                          height: min(popupSize.height, max(0, screenBounds.height - 2 * padding)))
+        let x = max(screenBounds.minX + padding,
+                    min(cursor.x - size.width / 2, screenBounds.maxX - padding - size.width))
+        let y = max(screenBounds.minY + padding,
+                    min(cursor.y - size.height / 2, screenBounds.maxY - padding - size.height))
+        return CGRect(origin: CGPoint(x: x, y: y), size: size)
+    }
+
+    /// Places the sub-bar outside the vertical anchor, flipping if the preferred side is full.
+    static func subBarY(anchor: CGRect, height: CGFloat, preferAbove: Bool, screenBounds: CGRect) -> (y: CGFloat, above: Bool) {
+        let inset = PopupMetrics.popupShadowInset
+        let padding = PopupMetrics.popupPadding
+        let yAbove = anchor.maxY + 6 - inset
+        let yBelow = anchor.minY - 6 + inset - height
+        let aboveFits = yAbove + height <= screenBounds.maxY - padding
+        let belowFits = yBelow >= screenBounds.minY + padding
+        let above = preferAbove ? aboveFits || !belowFits : !belowFits && aboveFits
+        return (above ? yAbove : yBelow, above)
     }
 
     /// Distance from the window frame's left edge to the center of the first action button
@@ -177,11 +206,13 @@ public struct PopupPositioner: Sendable {
     /// Selects the screen containing `point`, with a 2pt inclusive margin so cursor coordinates
     /// resting exactly on the maxX/maxY boundaries of secondary displays do not fail resolution.
     public static func screen(containing point: CGPoint, in screens: [NSScreen] = NSScreen.screens) -> NSScreen? {
-        screens.first { $0.frame.insetBy(dx: -2, dy: -2).contains(point) } ?? screens.first
+        screens.first { $0.frame.contains(point) }
+            ?? screens.first { $0.frame.insetBy(dx: -2, dy: -2).contains(point) } ?? screens.first
     }
 
     /// Selects the screen frame containing `point` with inclusive boundary tolerance.
     public static func screenFrame(containing point: CGPoint, screenFrames: [CGRect]) -> CGRect? {
-        screenFrames.first { $0.insetBy(dx: -2, dy: -2).contains(point) } ?? screenFrames.first
+        screenFrames.first { $0.contains(point) }
+            ?? screenFrames.first { $0.insetBy(dx: -2, dy: -2).contains(point) } ?? screenFrames.first
     }
 }

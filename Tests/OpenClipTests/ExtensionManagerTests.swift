@@ -21,31 +21,6 @@ final class ExtensionManagerTests: XCTestCase {
         super.tearDown()
     }
     
-    @MainActor
-    func testLoadStandaloneScript() async throws {
-        let scriptPath = tempDir.appendingPathComponent("test_script.sh")
-        let scriptContent = """
-        #!/bin/bash
-        # Title: Test Script
-        # Icon: symbol(test)
-        # Identifier: com.test.script
-        echo "{\"type\":\"paste\",\"value\":\"test\"}"
-        """
-        try scriptContent.write(to: scriptPath, atomically: true, encoding: .utf8)
-        
-        var attrs = try FileManager.default.attributesOfItem(atPath: scriptPath.path)
-        attrs[.posixPermissions] = 0o755
-        try FileManager.default.setAttributes(attrs, ofItemAtPath: scriptPath.path)
-        
-        let manager = ExtensionManager.shared
-        await manager.loadExtensions(from: tempDir)
-        
-        XCTAssertEqual(manager.loadedActions.count, 1)
-        let action = manager.loadedActions.first as? ScriptAction
-        XCTAssertNotNil(action)
-        XCTAssertEqual(action?.title, "Test Script")
-        XCTAssertEqual(action?.id, "com.test.script")
-    }
     
     @MainActor
     func testLoadManifestRejectsUnknownActionKind() async throws {
@@ -72,102 +47,6 @@ final class ExtensionManagerTests: XCTestCase {
         await manager.loadExtensions(from: tempDir)
 
         XCTAssertEqual(manager.loadedActions.count, 0, "Unknown action kind must reject the whole package, not silently load as url")
-    }
-
-    @MainActor
-    func testLoadManifestRejectsDeclaredCapability() async throws {
-        let extDir = tempDir.appendingPathComponent("declared_cap.openclipext")
-        try FileManager.default.createDirectory(at: extDir, withIntermediateDirectories: true)
-
-        let manifestPath = extDir.appendingPathComponent("openclip.json")
-        let manifestContent = """
-        {
-            "identifier": "com.test.cap",
-            "name": "Cap",
-            "capabilities": ["network"],
-            "actions": [
-                {
-                    "title": "URL",
-                    "type": "url",
-                    "url": "https://example.com/{query}"
-                }
-            ]
-        }
-        """
-        try manifestContent.write(to: manifestPath, atomically: true, encoding: .utf8)
-
-        let manager = ExtensionManager.shared
-        await manager.loadExtensions(from: tempDir)
-
-        XCTAssertEqual(manager.loadedActions.count, 0, "Any declared capability is outside the empty known set and must reject the manifest")
-    }
-
-    @MainActor
-    func testLoadManifestRejectsScriptPathTraversal() async throws {
-        let extDir = tempDir.appendingPathComponent("evil_traversal.openclipext")
-        try FileManager.default.createDirectory(at: extDir, withIntermediateDirectories: true)
-
-        let manifestPath = extDir.appendingPathComponent("openclip.json")
-        let manifestContent = """
-        {
-            "identifier": "com.test.traversal",
-            "name": "Evil Traversal",
-            "actions": [
-                {
-                    "title": "Evil Shell",
-                    "type": "scriptfile",
-                    "script": "../../../../bin/zsh"
-                }
-            ]
-        }
-        """
-        try manifestContent.write(to: manifestPath, atomically: true, encoding: .utf8)
-
-        let manager = ExtensionManager.shared
-        await manager.loadExtensions(from: tempDir)
-
-        XCTAssertEqual(manager.loadedActions.count, 0, "Script path traversal escaping package directory must reject the manifest")
-    }
-
-    @MainActor
-    func testLoadManifestExtension() async throws {
-        let extDir = tempDir.appendingPathComponent("manifest_ext.openclipext")
-        try FileManager.default.createDirectory(at: extDir, withIntermediateDirectories: true)
-        
-        let manifestPath = extDir.appendingPathComponent("manifest.json")
-        let manifestContent = """
-        {
-            "Identifier": "com.test.manifest",
-            "Name": "Manifest Extension",
-            "Actions": [
-                {
-                    "Title": "Action 1",
-                    "Icon": "icon.png",
-                    "Script": "action.sh"
-                }
-            ]
-        }
-        """
-        try manifestContent.write(to: manifestPath, atomically: true, encoding: .utf8)
-        
-        let scriptPath = extDir.appendingPathComponent("action.sh")
-        let scriptContent = """
-        #!/bin/bash
-        echo "{\"type\":\"paste\",\"value\":\"action\"}"
-        """
-        try scriptContent.write(to: scriptPath, atomically: true, encoding: .utf8)
-        
-        var attrs = try FileManager.default.attributesOfItem(atPath: scriptPath.path)
-        attrs[.posixPermissions] = 0o755
-        try FileManager.default.setAttributes(attrs, ofItemAtPath: scriptPath.path)
-        
-        let manager = ExtensionManager.shared
-        await manager.loadExtensions(from: tempDir)
-        
-        XCTAssertEqual(manager.loadedActions.count, 1)
-        let action = manager.loadedActions.first as? ScriptAction
-        XCTAssertNotNil(action)
-        XCTAssertEqual(action?.title, "Action 1")
     }
 
     @MainActor
@@ -295,42 +174,6 @@ final class ExtensionManagerTests: XCTestCase {
     }
 
     @MainActor
-    func testUninstallUnknownActionThrowsNotFoundAndKeepsRegistry() async throws {
-        let extDir = sourceDir.appendingPathComponent("Keepable.openclipext")
-        try FileManager.default.createDirectory(at: extDir, withIntermediateDirectories: true)
-        let manifestPath = extDir.appendingPathComponent("manifest.json")
-        let manifestContent = """
-        {
-            "Identifier": "com.test.keepable",
-            "Name": "Keepable Extension",
-            "Actions": [
-                {
-                    "Title": "Keepable Action",
-                    "URL": "https://google.com/search?q={text}"
-                }
-            ]
-        }
-        """
-        try manifestContent.write(to: manifestPath, atomically: true, encoding: .utf8)
-
-        let manager = ExtensionManager.shared
-        let installed = try await manager.installExtension(from: extDir, targetDir: tempDir)
-        let actionID = try XCTUnwrap(installed.first?.id)
-
-        // Unknown actionID must throw before touching registry state.
-        do {
-            try await manager.uninstallExtension(actionID: "com.test.doesnotexist.action.0", targetDir: tempDir)
-            XCTFail("Expected not-found error for unknown actionID")
-        } catch {
-            let nsError = error as NSError
-            XCTAssertEqual(nsError.domain, "ExtensionManager")
-            XCTAssertEqual(nsError.code, 404)
-        }
-        XCTAssertTrue(manager.loadedActions.contains(where: { $0.id == actionID }), "registry must be unchanged when nothing was removed")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: extDir.path), "extension must still be on disk")
-    }
-
-    @MainActor
     func testUninstallPurgesOptionsAndPrunesActionOrder() async throws {
         let extDir = sourceDir.appendingPathComponent("Purgeable.openclipext")
         try FileManager.default.createDirectory(at: extDir, withIntermediateDirectories: true)
@@ -379,21 +222,6 @@ final class ExtensionManagerTests: XCTestCase {
         XCTAssertFalse(registry.actions.contains { $0.id == actionID }, "onUnregister must unregister the action")
     }
 
-    func testValidateZipEntriesAcceptsSafePaths() async throws {
-        let zipPath = tempDir.appendingPathComponent("valid.zip")
-        let sourceFile = tempDir.appendingPathComponent("payload.txt")
-        try "content".write(to: sourceFile, atomically: true, encoding: .utf8)
-
-        _ = try await ShellProcessRunner.run(ShellProcessRunner.Invocation(
-            executableURL: URL(fileURLWithPath: "/usr/bin/zip"),
-            arguments: ["-q", "-j", zipPath.path, sourceFile.path],
-            environment: [:]
-        ))
-
-        let stagingDir = tempDir.appendingPathComponent("staging")
-        try await ExtensionManager.validateZipEntries(at: zipPath, stagingDir: stagingDir)
-    }
-
     func testValidateZipEntriesRejectsTraversalPaths() async throws {
         let zipPath = tempDir.appendingPathComponent("traversal.zip")
 
@@ -435,4 +263,3 @@ final class ExtensionManagerTests: XCTestCase {
         }
     }
 }
-

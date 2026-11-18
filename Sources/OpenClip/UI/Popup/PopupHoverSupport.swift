@@ -52,13 +52,15 @@ struct PopupContentSizePreferenceKey: PreferenceKey {
 }
 
 extension View {
-    func popupHoverTarget(_ target: PopupHoverTarget) -> some View {
+    func popupHoverTarget(_ target: PopupHoverTarget, isEnabled: Bool = true) -> some View {
         background {
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: PopupHoverFramePreferenceKey.self,
-                    value: [target: proxy.frame(in: .named("popupHoverSpace"))]
-                )
+            if isEnabled {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: PopupHoverFramePreferenceKey.self,
+                        value: [target: proxy.frame(in: .named("popupHoverSpace"))]
+                    )
+                }
             }
         }
     }

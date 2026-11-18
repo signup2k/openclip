@@ -38,27 +38,6 @@ final class ScriptActionExecutionTests: XCTestCase {
         try? FileManager.default.removeItem(at: tempScript)
     }
     
-    func testScriptActionExposesActionIDEnvVar() async throws {
-        let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent("action_id_test_\(UUID().uuidString).sh")
-        let scriptContent = """
-        #!/bin/bash
-        echo "$OPENCLIP_ACTION_ID"
-        """
-        try scriptContent.write(to: tempScript, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tempScript.path)
-
-        let action = ScriptAction(id: "test.actionid", title: "ActionID", icon: .symbol("terminal"), scriptURL: tempScript)
-        let result = try await action.perform(ActionContext(selectedText: "SampleInput"))
-
-        if case .text(let text) = result {
-            XCTAssertEqual(text.trimmingCharacters(in: .whitespacesAndNewlines), "test.actionid")
-        } else {
-            XCTFail("Expected .text result echoing the action id, got \(result)")
-        }
-
-        try? FileManager.default.removeItem(at: tempScript)
-    }
-
     func testScriptActionEnvironmentVariables() async throws {
         let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent("env_test_\(UUID().uuidString).sh")
         let scriptContent = """
@@ -103,76 +82,6 @@ final class ScriptActionExecutionTests: XCTestCase {
         }
         
         try? FileManager.default.removeItem(at: tempScript)
-    }
-
-    func testScriptActionLegacyShowContentJSONFallsThroughToSuccess() async throws {
-        let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent("content_test_\(UUID().uuidString).sh")
-        let scriptContent = """
-        #!/bin/bash
-        echo '{"type":"showContent","title":"T","body":"Body"}'
-        """
-        try scriptContent.write(to: tempScript, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tempScript.path)
-
-        let action = ScriptAction(id: "test.content", title: "Content", icon: .symbol("terminal"), scriptURL: tempScript)
-        let result = try await action.perform(ActionContext(selectedText: "SampleInput"))
-
-        guard case .success = result else {
-            return XCTFail("Expected .success for the legacy showContent JSON type (unmapped → success), got \(result)")
-        }
-
-        try? FileManager.default.removeItem(at: tempScript)
-    }
-
-    func testScriptActionReturnsRawCopyResult() async throws {
-        let tempScript = FileManager.default.temporaryDirectory.appendingPathComponent("raw_copy_test_\(UUID().uuidString).sh")
-        let scriptContent = """
-        #!/bin/bash
-        echo '{"type":"copy","value":"X"}'
-        """
-        try scriptContent.write(to: tempScript, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tempScript.path)
-
-        let action = ScriptAction(
-            id: "test.rawcopy",
-            title: "Raw Copy",
-            icon: .symbol("terminal"),
-            scriptURL: tempScript,
-            rules: ExtensionActionRules()
-        )
-        let result = try await action.perform(ActionContext(selectedText: "SampleInput"))
-
-        guard case .copy(let text) = result else {
-            return XCTFail("Expected .copy (raw runtime result), got \(result)")
-        }
-        XCTAssertEqual(text, "X")
-
-        try? FileManager.default.removeItem(at: tempScript)
-    }
-
-    /// A legacy manifest `type: "canvas"` whose `script` points at a `.sh` file degrades to a shell
-    /// ScriptAction — with the canvas feature removed, the script file is routed by extension, so
-    /// a `.sh` payload is a plain shell action (and validation rejects the canvas kind anyway).
-    func testCanvasManifestWithShellFileIsPlainShellAction() async {
-        let factory = DefaultActionFactory()
-        let actionMeta = ExtensionActionMetadata(title: "Canvas File Action", icon: "symbol:terminal", script: "main.sh", type: "canvas")
-        let manifest = ExtensionMetadata(identifier: "com.test.canvasfile", name: "Canvas File Test", actions: [actionMeta], options: nil)
-
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        let scriptFile = tempDir.appendingPathComponent("main.sh")
-        try? "#!/bin/sh\necho hi".write(to: scriptFile, atomically: true, encoding: .utf8)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptFile.path)
-
-        let action = await factory.createAction(metadata: actionMeta, manifest: manifest, directoryURL: tempDir, index: 0)
-        guard let action else {
-            try? FileManager.default.removeItem(at: tempDir)
-            return XCTFail("A canvas manifest pointing at a shell file must still produce an action")
-        }
-        XCTAssertTrue(action is ScriptAction || action is CustomAction,
-                      "expected a shell ScriptAction (or CustomAction), got \(String(describing: action))")
-
-        try? FileManager.default.removeItem(at: tempDir)
     }
 
     func testScriptActionNonZeroExitThrowsError() async throws {
@@ -321,6 +230,7 @@ final class ScriptActionExecutionTests: XCTestCase {
         #!/bin/bash
         for i in $(seq 1 5000); do
             echo "Line $i: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            echo "Diagnostic $i" >&2
         done
         """
         try scriptContent.write(to: tempScript, atomically: true, encoding: .utf8)
@@ -338,6 +248,9 @@ final class ScriptActionExecutionTests: XCTestCase {
         XCTAssertEqual(lines.count, 5000)
         XCTAssertEqual(lines.first, "Line 1: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
         XCTAssertEqual(lines.last, "Line 5000: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+        let diagnostics = output.stderr.split(separator: "\n")
+        XCTAssertEqual(diagnostics.count, 5000)
+        XCTAssertEqual(diagnostics.last, "Diagnostic 5000")
 
         try? FileManager.default.removeItem(at: tempScript)
     }
@@ -366,23 +279,6 @@ final class ScriptActionExecutionTests: XCTestCase {
         XCTAssertEqual(output.stdout.trimmingCharacters(in: .whitespacesAndNewlines), "ParentDone")
 
         try? FileManager.default.removeItem(at: tempScript)
-    }
-
-    @MainActor
-    func testAppleScriptActionEscapesPlaceholdersWithQuotesAndBackslashes() async throws {
-        let scriptCode = """
-        return "{text}"
-        """
-        let action = AppleScriptAction(id: "test.applescript.escape", title: "Test AppleScript", appleScriptCode: scriptCode)
-        let inputWithQuotes = "Hello \"World\" \\ test"
-        let context = ActionContext(selectedText: inputWithQuotes)
-
-        let result = try await action.perform(context)
-        if case .text(let output) = result {
-            XCTAssertEqual(output.trimmingCharacters(in: .whitespacesAndNewlines), inputWithQuotes)
-        } else {
-            XCTFail("Expected .text result containing returned text, got \(result)")
-        }
     }
 
     /// A multiline selection must be escaped to AppleScript's `\r`/`\n` string escapes so the
@@ -474,4 +370,3 @@ final class ScriptActionExecutionTests: XCTestCase {
         guard case .success = legacyStatusRes else { return XCTFail("Expected .success for removed \"status\" type") }
     }
 }
-

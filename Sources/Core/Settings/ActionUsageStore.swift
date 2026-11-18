@@ -36,10 +36,4 @@ public final class ActionUsageStore {
         }
         settingsStore.set(.actionUsageRecency, value: cached)
     }
-
-    /// Clears all usage history.
-    public func reset() {
-        cached = [:]
-        settingsStore.set(.actionUsageRecency, value: cached)
-    }
 }

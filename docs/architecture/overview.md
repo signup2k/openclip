@@ -12,7 +12,7 @@ The codebase is split into two primary targets:
 OpenClip Workspace
 ├── Core (Framework / Swift Package)
 │ ├── Pure domain models (Action, ActionChrome, ActionResult, SelectionContext)
-│ ├── Selection detection contracts (TextRetrieving, SelectionMonitoring)
+│ ├── Selection context and text result models
 │ ├── Central action catalog & ordering (ActionRegistry, ActionCoordinator)
 │ ├── Action-search matcher & popup mode (ActionSearch)
 │ ├── Strongly-typed settings engine (SettingsStore, SettingKey)

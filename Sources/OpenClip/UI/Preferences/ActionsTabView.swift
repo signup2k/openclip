@@ -190,6 +190,15 @@ struct ActionRowView: View {
                     .popover(isPresented: $showingConfigSheet, arrowEdge: .leading) {
                         if isAITools {
                             ConfigureAISheet()
+                        } else if isAI, let preset = AIServiceManager.shared.preset(forActionID: action.id) {
+                            EditAIPresetSheet(
+                                preset: preset,
+                                isCustom: !AIServiceManager.defaultPresets.contains { $0.id == preset.id },
+                                onSave: { AIServiceManager.shared.updatePreset($0) },
+                                onDelete: {
+                                    AIServiceManager.shared.presets.removeAll { $0.id == preset.id }
+                                }
+                            )
                         } else if action.chrome.rowStyle == .actionGroup {
                             EditGroupSheet(groupID: action.id)
                         } else {

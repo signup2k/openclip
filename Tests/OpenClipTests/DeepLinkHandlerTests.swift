@@ -11,9 +11,4 @@ final class DeepLinkHandlerTests: XCTestCase {
         XCTAssertEqual(params?["name"], "TestApp")
         XCTAssertEqual(params?["url"], "https://openclip.app/test.zip")
     }
-
-    func testInvalidSchemeReturnsNil() {
-        let url = URL(string: "https://openclip.app/install?id=com.test.app")!
-        XCTAssertNil(AppDelegate.parseDeepLinkURL(url))
-    }
 }

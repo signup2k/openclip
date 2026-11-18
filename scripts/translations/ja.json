@@ -225,6 +225,8 @@
   "Rewrite to improve clarity, flow, and vocabulary while keeping the original meaning and language": "元の意味と言語を維持しながら、明瞭さ、文章の流れ、語彙を改善するように書き直します",
   "Summarize": "要約",
   "Provide a concise bulleted summary capturing the key points": "要点を簡潔な箇条書きでまとめます",
+  "Could not remove the saved API key.": "保存済みの API キーを削除できませんでした。",
+  "Could not save the API key.": "API キーを保存できませんでした。",
   "Explain": "説明",
   "Explain the core concept clearly and concisely in simple terms": "核心となる概念をわかりやすい言葉で明確かつ簡潔に説明します",
   "Translate": "翻訳",
@@ -427,5 +429,11 @@
   "Paused in %@": "%@ で一時停止中",
   "Pause in App": "アプリで一時停止",
   "Resume OpenClip (%lldm left)": "OpenClip を再開 (残り %lld 分)",
-  "Personal build. Install updates manually.": "個人用ビルドです。更新は手動でインストールしてください。"
+  "Personal build. Install updates manually.": "個人用ビルドです。更新は手動でインストールしてください。",
+  "Menu Layout": "メニュー配置",
+  "Horizontal": "横並び",
+  "Radial": "円形",
+  "Choose an action": "アクションを選択",
+  "Radial menus open around the pointer. Move into a sector, then click.": "円形メニューはポインタを中心に開きます。扇形の領域に移動してクリックしてください。",
+  "Search and analyze, then ELI25. Explain concisely in Chinese:": "検索・分析したうえで、ELI25。中国語で簡潔に説明してください："
 }

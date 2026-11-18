@@ -19,7 +19,7 @@ struct PopupPreview: View {
         CopyAction(),
         CutAction(),
         PasteAction(),
-        AIToolsAction()
+        AIAction(presetID: "explain", title: String(localized: "Explain"))
     ]
 
     /// The preview observes its own hover state (and ignores hover entirely), so it

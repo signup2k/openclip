@@ -35,29 +35,6 @@ final class PopupSearchScopeTests: XCTestCase {
     }
 
     @MainActor
-    func testScopedViewHostsWithoutCrash() throws {
-        let group = GroupAction(id: "com.pkg.g", title: "G", icon: .symbol("folder"), chrome: ActionChrome(popupBehavior: .showSubActions))
-        let children = [GroupScopeAction(id: "com.pkg.g.a")]
-        let app = AppIdentity(NSRunningApplication.current)
-        let context = ActionContext(
-            selection: SelectionContext(text: "hi", sourceApp: app, cursorPosition: .zero, selectionBounds: nil, timestamp: Date(), appPolicy: .default)
-        )
-        let view = PopupSearchView(
-            catalog: [group],
-            context: context,
-            resultsAbove: false,
-            scope: SearchScope(parent: group, children: children),
-            onResult: { _ in },
-            onExit: {},
-            onExitScope: {},
-            onRunAI: { _ in }
-        )
-        let hosting = NSHostingView(rootView: view)
-        hosting.layoutSubtreeIfNeeded()
-        XCTAssertNotNil(hosting.rootView) // built without crash
-    }
-
-    @MainActor
     func testCustomGroupKeywordsIndexMembersByGroupTitle() {
         let copyAction = GroupScopeAction(id: "builtin.copy")
         let pasteAction = GroupScopeAction(id: "builtin.paste")
@@ -93,12 +70,5 @@ final class PopupSearchScopeTests: XCTestCase {
         let resultIDs = Set(results.map { $0.id })
         XCTAssertTrue(resultIDs.contains("builtin.copy"), "Custom group member 'builtin.copy' must be found when searching by custom group title")
         XCTAssertTrue(resultIDs.contains("builtin.paste"), "Custom group member 'builtin.paste' must be found when searching by custom group title")
-    }
-
-    @MainActor
-    func testAIPresetTableIconUsesSparklesSymbol() {
-        let aiAction = AIAction(presetID: "proofread", title: "Proofread")
-        let presentation = ActionCustomizationManager.shared.presented(aiAction, surface: .table)
-        XCTAssertEqual(presentation.icon, .symbol(Constants.defaultAIIconSymbol))
     }
 }

@@ -24,7 +24,7 @@ public struct PasteboardCopyEngine {
         }
     }
 
-    public typealias CopyTrigger = @MainActor () -> Void
+    public typealias CopyTrigger = @MainActor (Date, @escaping @Sendable () -> Bool) -> Void
 
     /// Runs `trigger` between archiving the pasteboard and polling for a change.
     ///
@@ -33,14 +33,12 @@ public struct PasteboardCopyEngine {
     ///   - timeout: Maximum seconds to wait for the pasteboard changeCount to advance and yield text.
     ///     Defaults to a per-app profile: Safari gets a longer budget because its copy path is
     ///     observably slower to stabilize.
-    ///   - restoreDelay: Retained for source compatibility; restoration is immediate.
     ///   - trigger: Performs the actual copy (AX menu press or keyboard event).
     /// - Returns: The copied text plus HTML/RTF when the source app wrote those representations,
     ///   or `nil` when the changeCount never advances or the copied text is empty.
     public func capture(
         pasteboard: NSPasteboard = .general,
         timeout: TimeInterval? = nil,
-        restoreDelay: TimeInterval = Constants.pasteboardRestoreDelay,
         inputRevision: @MainActor () -> [UInt32] = PasteboardCopyEngine.hardwareInputRevision,
         trigger: CopyTrigger
     ) async -> TextResult? {
@@ -57,47 +55,57 @@ public struct PasteboardCopyEngine {
         let initialChangeCount = pasteboard.changeCount
 
         guard !Task.isCancelled, inputRevision() == input else { return nil }
-        trigger()
-
         let resolvedTimeout = timeout ?? Self.pollingTimeout()
         let pollInterval: TimeInterval = 0.002
         let deadline = Date().addingTimeInterval(resolvedTimeout)
-        var result: TextResult?
+        let ended = CancellationFlag()
+        return await withTaskCancellationHandler {
+            defer { ended.set() }
+            guard !Task.isCancelled else { return nil }
+            trigger(deadline) { !ended.isSet && Date() < deadline }
+            var result: TextResult?
 
-        while Date() < deadline && !Task.isCancelled {
-            guard inputRevision() == input else { return nil }
-            if pasteboard.changeCount != initialChangeCount {
-                let observedChangeCount = pasteboard.changeCount
-                if let candidate = pasteboard.string(forType: .string),
-                   Self.hasSelection(candidate) {
-                    let html = pasteboard.string(forType: .html) ?? Self.htmlFromRTF(pasteboard)
-                    let rtf = pasteboard.string(forType: .rtf)
-                    guard pasteboard.changeCount == observedChangeCount else { continue }
-                    result = TextResult(text: candidate, bounds: nil, html: html, rtf: rtf)
-                    break
+            while Date() < deadline && !Task.isCancelled {
+                guard inputRevision() == input else { return nil }
+                if pasteboard.changeCount != initialChangeCount {
+                    let observedChangeCount = pasteboard.changeCount
+                    if let candidate = pasteboard.string(forType: .string),
+                       TextSanitizer.isSubstantial(candidate) {
+                        let html = pasteboard.string(forType: .html) ?? Self.htmlFromRTF(pasteboard)
+                        let rtf = pasteboard.string(forType: .rtf)
+                        guard pasteboard.changeCount == observedChangeCount else { continue }
+                        result = TextResult(text: candidate, bounds: nil, html: html, rtf: rtf)
+                        break
+                    }
                 }
+                try? await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
             }
-            try? await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
-        }
 
-        // Check again after reading promised pasteboard data, which can involve target-app IPC.
-        guard inputRevision() == input else { return nil }
-        guard let result else {
-            if pasteboard.changeCount != initialChangeCount {
-                Log.selection.debug("Copy engine: no non-empty pasteboard text within deadline; restoring immediately")
-                snapshot.restore(to: pasteboard, transientMarkers: true)
+            ended.set()
+
+            // A real key cancels the monitor task even if a remapper/automation event does not
+            // advance HID counters. Cancellation must also relinquish clipboard restoration.
+            // Recheck after promised-data IPC, before writing any archived content back.
+            guard !Task.isCancelled, inputRevision() == input else { return nil }
+            guard let result else {
+                if pasteboard.changeCount != initialChangeCount {
+                    Log.selection.debug("Copy engine: no non-empty pasteboard text within deadline; restoring immediately")
+                    snapshot.restore(to: pasteboard, transientMarkers: true)
+                }
+                return nil
             }
-            return nil
-        }
 
-        snapshot.restore(to: pasteboard, transientMarkers: true)
-        return Task.isCancelled ? nil : result
+            snapshot.restore(to: pasteboard, transientMarkers: true)
+            return Task.isCancelled ? nil : result
+        } onCancel: {
+            ended.set()
+        }
     }
 
     /// Per-app copy polling timeout. Browsers (Chromium, Safari, Firefox, Arc) need more time
     /// for asynchronous multi-process IPC clipboard operations to stabilize; other apps resolve
     /// within the default budget.
-    public static func pollingTimeout(for bundleID: String?) -> TimeInterval {
+    private static func pollingTimeout(for bundleID: String?) -> TimeInterval {
         guard let bundleID else { return Constants.pasteboardCopyTimeout }
         if isBrowser(bundleID) {
             return Constants.safariPasteboardCopyTimeout
@@ -105,7 +113,7 @@ public struct PasteboardCopyEngine {
         return Constants.pasteboardCopyTimeout
     }
 
-    public static func isBrowser(_ bundleID: String) -> Bool {
+    private static func isBrowser(_ bundleID: String) -> Bool {
         DefaultAppRules.matchesAny(
             DefaultAppRules.safariGroup + DefaultAppRules.chromiumGroup + DefaultAppRules.firefoxGroup + DefaultAppRules.arcGroup,
             bundleID: bundleID
@@ -114,11 +122,6 @@ public struct PasteboardCopyEngine {
 
     private static func pollingTimeout() -> TimeInterval {
         pollingTimeout(for: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
-    }
-
-    /// Returns `true` only when `text` is non-nil and contains visible, substantial characters.
-    public static func hasSelection(_ text: String?) -> Bool {
-        TextSanitizer.isSubstantial(text)
     }
 
     /// Converts a pasteboard's RTF data into HTML. Apps that copy rich text without an HTML

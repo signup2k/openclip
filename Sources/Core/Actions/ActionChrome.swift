@@ -29,9 +29,7 @@ public struct ActionChrome: Codable, Sendable, Equatable {
         case builtin
         case custom
         case extensionPkg(packageID: String)
-        /// AI preset action (a row in AIServiceManager's preset list). Reachable through the
-        /// action-search palette and Preferences → Actions, never through the popup bar
-        /// (the reorderable `builtin.aiTools` action is the bar's entry point to AI).
+        /// Individual AI preset in Preferences, action search, and the popup when enabled.
         case ai
     }
 
@@ -42,9 +40,7 @@ public struct ActionChrome: Codable, Sendable, Equatable {
     /// True when the action reads or mutates the real text selection (e.g. Copy/Cut) and is
     /// therefore unsafe when the text came from the clipboard rather than a live selection.
     public let requiresLiveSelection: Bool
-    /// True when the action is an AI-mode launcher (the "AI Tools" bar entry). The popup bar
-    /// routes its click into AI mode instead of `perform`, and the search palette excludes it
-    /// (AI presets are already searchable there).
+    /// Identifies the AI Tools settings row. The popup and search show individual presets.
     public let launchesAI: Bool
     /// True when the action is slow (e.g. an AppleScript that activates an app) and the popup
     /// should close immediately on click with a spinner toast until the result lands.

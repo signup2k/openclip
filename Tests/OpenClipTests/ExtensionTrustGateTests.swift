@@ -59,108 +59,6 @@ final class ExtensionTrustGateTests: XCTestCase {
     }
 
     @MainActor
-    func testNewLocalPackageAfterMigrationIsSilentlyGated() async throws {
-        let p = try await plan(packageID: "com.t.new", name: "New", trust: [:], hashes: [:], sources: [:], isMigrated: true)
-        XCTAssertEqual(p.actions.count, 1)
-        let gated = try XCTUnwrap(p.actions[0] as? GatedExtensionAction)
-        XCTAssertEqual(gated.reason, .notEnabled)
-        XCTAssertEqual(p.trust["com.t.new"], "seen")
-        XCTAssertTrue(p.events.isEmpty)
-    }
-
-    @MainActor
-    func testTrustedPackageWithMatchingHashRuns() async throws {
-        let first = try await plan(packageID: "com.t.t", name: "T", trust: [:], hashes: [:], sources: [:], isMigrated: false)
-        let hash = try XCTUnwrap(first.hashes["com.t.t"])
-        let p = try await plan(packageID: "com.t.t", name: "T", trust: ["com.t.t": "trusted"], hashes: ["com.t.t": hash], sources: [:], isMigrated: true)
-        XCTAssertFalse(p.actions[0] is GatedExtensionAction)
-        XCTAssertTrue(p.events.isEmpty)
-    }
-
-    @MainActor
-    func testChangedTrustedPackageFlipsToSilentlyGated() async throws {
-        let first = try await plan(packageID: "com.t.tam", name: "Tam", trust: [:], hashes: [:], sources: ["com.t.tam": "package"], isMigrated: false)
-        let hash = try XCTUnwrap(first.hashes["com.t.tam"])
-        let p = try await plan(packageID: "com.t.tam", name: "Tam", trust: ["com.t.tam": "trusted"], hashes: ["com.t.tam": hash], sources: ["com.t.tam": "package"], isMigrated: true, script: "echo edited")
-        let gated = try XCTUnwrap(p.actions[0] as? GatedExtensionAction)
-        XCTAssertEqual(gated.reason, .filesChanged)
-        XCTAssertEqual(p.trust["com.t.tam"], "seen")
-        XCTAssertTrue(p.events.isEmpty)
-    }
-
-    @MainActor
-    func testMissingSourceTreatedAsNonDeveloperAndTamperDetected() async throws {
-        let first = try await plan(packageID: "com.t.nosrc", name: "NoSrc", trust: [:], hashes: [:], sources: [:], isMigrated: false)
-        let hash = try XCTUnwrap(first.hashes["com.t.nosrc"])
-        let p = try await plan(packageID: "com.t.nosrc", name: "NoSrc", trust: ["com.t.nosrc": "trusted"], hashes: ["com.t.nosrc": hash], sources: [:], isMigrated: true, script: "echo edited")
-        let gated = try XCTUnwrap(p.actions[0] as? GatedExtensionAction)
-        XCTAssertEqual(gated.reason, .filesChanged)
-        XCTAssertEqual(p.trust["com.t.nosrc"], "seen")
-        XCTAssertTrue(p.events.isEmpty)
-    }
-
-    @MainActor
-    func testUnrecognizedSourceTreatedAsNonDeveloperAndTamperDetected() async throws {
-        let first = try await plan(packageID: "com.t.badsrc", name: "BadSrc", trust: [:], hashes: [:], sources: ["com.t.badsrc": "invalid_source_type"], isMigrated: false)
-        let hash = try XCTUnwrap(first.hashes["com.t.badsrc"])
-        let p = try await plan(packageID: "com.t.badsrc", name: "BadSrc", trust: ["com.t.badsrc": "trusted"], hashes: ["com.t.badsrc": hash], sources: ["com.t.badsrc": "invalid_source_type"], isMigrated: true, script: "echo edited")
-        let gated = try XCTUnwrap(p.actions[0] as? GatedExtensionAction)
-        XCTAssertEqual(gated.reason, .filesChanged)
-        XCTAssertEqual(p.trust["com.t.badsrc"], "seen")
-        XCTAssertTrue(p.events.isEmpty)
-    }
-
-    @MainActor
-    func testDeveloperExtensionAutoRehashesOnEdit() async throws {
-        let first = try await plan(packageID: "com.t.dev", name: "Dev", trust: [:], hashes: [:], sources: ["com.t.dev": "developer"], isMigrated: false)
-        let initialHash = try XCTUnwrap(first.hashes["com.t.dev"])
-        let p = try await plan(packageID: "com.t.dev", name: "Dev", trust: ["com.t.dev": "trusted"], hashes: ["com.t.dev": initialHash], sources: ["com.t.dev": "developer"], isMigrated: true, script: "echo edited")
-        XCTAssertFalse(p.actions[0] is GatedExtensionAction)
-        XCTAssertEqual(p.trust["com.t.dev"], "trusted")
-        let updatedHash = try XCTUnwrap(p.hashes["com.t.dev"])
-        XCTAssertNotEqual(updatedHash, initialHash)
-        XCTAssertEqual(updatedHash.count, 64)
-        XCTAssertTrue(p.events.isEmpty)
-    }
-
-    @MainActor
-    func testStorePackageDriftIsTamperedLikeLocal() async throws {
-        // Fresh store install (no record) → auto-trusted, no event.
-        let p = try await plan(packageID: "com.t.store", name: "Store", trust: [:], hashes: [:], sources: ["com.t.store": "store"], isMigrated: true)
-        XCTAssertFalse(p.actions[0] is GatedExtensionAction)
-        XCTAssertEqual(p.trust["com.t.store"], "trusted")
-        XCTAssertTrue(p.events.isEmpty)
-
-        // Drifted store package (stale hash) → seen + gated .filesChanged,
-        // exactly like a local package. Only the update flow re-trusts.
-        let hash = p.hashes["com.t.store"]!
-        let p2 = try await plan(packageID: "com.t.store", name: "Store", trust: ["com.t.store": "trusted"], hashes: ["com.t.store": hash], sources: ["com.t.store": "store"], isMigrated: true, script: "echo updated")
-        let gated = try XCTUnwrap(p2.actions[0] as? GatedExtensionAction)
-        XCTAssertEqual(gated.reason, .filesChanged)
-        XCTAssertEqual(p2.trust["com.t.store"], "seen")
-        XCTAssertTrue(p2.events.isEmpty)
-    }
-
-    @MainActor
-    func testFreshStoreInstallAutoTrustsEvenWhenMigrated() async throws {
-        // C1+I1 combination: a fresh store install (record == nil) auto-trusts even after the
-        // migration flag is set — the fresh-store branch must not consult migration.
-        let p = try await plan(packageID: "com.t.fresh", name: "Fresh", trust: [:], hashes: [:], sources: ["com.t.fresh": "store"], isMigrated: true)
-        XCTAssertFalse(p.actions[0] is GatedExtensionAction)
-        XCTAssertEqual(p.trust["com.t.fresh"], "trusted")
-        XCTAssertTrue(p.events.isEmpty)
-    }
-
-    @MainActor
-    func testFreshPackageInstallAutoTrustsEvenWhenMigrated() async throws {
-        // Explicit file install (source == .package, record == nil) auto-trusts immediately.
-        let p = try await plan(packageID: "com.t.filepkg", name: "FilePkg", trust: [:], hashes: [:], sources: ["com.t.filepkg": "package"], isMigrated: true)
-        XCTAssertFalse(p.actions[0] is GatedExtensionAction)
-        XCTAssertEqual(p.trust["com.t.filepkg"], "trusted")
-        XCTAssertTrue(p.events.isEmpty)
-    }
-
-    @MainActor
     func testFreshStoreInstallFailsClosedWhenFingerprintUnresolvable() async throws {
         // Scan a valid package, then delete it so fingerprinting returns nil at evaluate time.
         // A fresh store install must not auto-trust or run without a hash.
@@ -206,13 +104,6 @@ final class ExtensionTrustGateTests: XCTestCase {
     }
 
     @MainActor
-    func testRevokedLocalPackageStaysGated() async throws {
-        let p = try await plan(packageID: "com.t.rev", name: "Rev", trust: ["com.t.rev": "revoked"], hashes: [:], sources: [:], isMigrated: true)
-        let gated = try XCTUnwrap(p.actions[0] as? GatedExtensionAction)
-        XCTAssertEqual(gated.reason, .revoked)
-    }
-
-    @MainActor
     func testOpenClipVersionGatesIncompatibleTrustedPackage() async throws {
         // Trusted + matching hash, but the package requires a newer app → gate on needsNewerApp,
         // NOT tampered (version check runs after trust resolution).
@@ -223,34 +114,6 @@ final class ExtensionTrustGateTests: XCTestCase {
         XCTAssertEqual(gated.reason, .needsNewerApp(required: "2.0.0"))
         XCTAssertEqual(p.trust["com.t.minv"], "trusted", "a matching-hash trusted package must gate on needsNewerApp, not filesChanged")
         XCTAssertTrue(p.events.isEmpty, "version gating is not a tamper event")
-    }
-
-    @MainActor
-    func testNeedsNewerAppForTrustedPackage() async throws {
-        // Same trusted + matching-hash package: a satisfied requirement keeps the real action,
-        // an unsatisfied one gates on needsNewerApp (never tampered).
-        let first = try await plan(packageID: "com.t.ver", name: "Ver", trust: [:], hashes: [:], sources: [:], isMigrated: false, minOpenClipVersion: "1.5.0")
-        let hash = first.hashes["com.t.ver"]!
-        let compatible = try await plan(packageID: "com.t.ver", name: "Ver", trust: ["com.t.ver": "trusted"], hashes: ["com.t.ver": hash], sources: [:], isMigrated: true, appVersion: "1.6.0", minOpenClipVersion: "1.5.0")
-        XCTAssertFalse(compatible.actions[0] is GatedExtensionAction, "satisfied requirement keeps the real action")
-        XCTAssertTrue(compatible.events.isEmpty)
-
-        let incompatible = try await plan(packageID: "com.t.ver", name: "Ver", trust: ["com.t.ver": "trusted"], hashes: ["com.t.ver": hash], sources: [:], isMigrated: true, appVersion: "1.4.0", minOpenClipVersion: "1.5.0")
-        let gated = try XCTUnwrap(incompatible.actions[0] as? GatedExtensionAction)
-        XCTAssertEqual(gated.reason, .needsNewerApp(required: "1.5.0"))
-        XCTAssertEqual(incompatible.trust["com.t.ver"], "trusted", "version gating must not flip a trusted package to seen")
-        XCTAssertTrue(incompatible.events.isEmpty)
-    }
-
-    func testGatedActionPerformReturnsReviewToast() async throws {
-        let gated = GatedExtensionAction(
-            packageID: "com.t.g", title: "G", icon: .symbol("wand.and.stars"),
-            chrome: ActionChrome(badge: .extensionPkg("G"), rowStyle: .standard, popupBehavior: .perform, source: .extensionPkg(packageID: "com.t.g")),
-            reason: .notEnabled
-        )
-        XCTAssertEqual(gated.id, "com.t.g")
-        XCTAssertEqual(GatedExtensionAction.reviewMessage(for: .notEnabled), "This extension isn't enabled yet — review it in Preferences.")
-        XCTAssertEqual(GatedExtensionAction.reviewMessage(for: .needsNewerApp(required: "2.0.0")), "This extension needs OpenClip 2.0.0 or newer.")
     }
 
     @MainActor

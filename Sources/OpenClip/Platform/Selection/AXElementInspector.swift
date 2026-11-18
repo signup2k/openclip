@@ -30,6 +30,12 @@ public struct AXElementInspector {
         public let bounds: CGRect?
     }
 
+    /// A focused native editor owns the selection even when its window also contains a webpage.
+    static func isNativeTextControl(role: String?, containedInRoles: Set<String>) -> Bool {
+        guard !containedInRoles.contains("AXWebArea"), let role else { return false }
+        return ["AXTextField", "AXTextArea", "AXSearchField", "AXComboBox"].contains(role)
+    }
+
     /// Maximum number of ancestor levels walked when collecting parent/container roles and
     /// hunting for a containing web area.
     public static let ancestorWalkDepth = 25
@@ -89,7 +95,7 @@ public struct AXElementInspector {
 
         // Fallback: If focusedElement was not inside an AXWebArea (e.g. user selected static text on a page
         // so focus remained at the window or outer container level), search the focused window for the active AXWebArea.
-        if webArea == nil, let app = focusedApp,
+        if webArea == nil, !isNativeTextControl(role: role, containedInRoles: containedInRoles), let app = focusedApp,
            let window = read(app, kAXFocusedWindowAttribute).flatMap({ axElement($0) }) {
             webArea = findFirstChild(role: webAreaRole, in: window, maxDepth: 6)
         }

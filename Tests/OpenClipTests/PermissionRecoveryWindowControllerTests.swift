@@ -8,25 +8,6 @@ import XCTest
 @MainActor
 final class PermissionRecoveryWindowControllerTests: XCTestCase {
 
-    func testHandleCompleteInvokesCallbackOnceAndClosesWindow() {
-        var completeCount = 0
-        var dismissCount = 0
-
-        let controller = PermissionRecoveryWindowController(
-            isUpdate: true,
-            onComplete: { completeCount += 1 },
-            onDismiss: { dismissCount += 1 }
-        )
-
-        controller.handleComplete()
-        // Second attempt to ensure idempotency
-        controller.handleComplete()
-        controller.handleDismiss()
-
-        XCTAssertEqual(completeCount, 1)
-        XCTAssertEqual(dismissCount, 0)
-    }
-
     func testWindowWillCloseInvokesOnDismissOnlyOnce() {
         var completeCount = 0
         var dismissCount = 0

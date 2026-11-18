@@ -6,7 +6,6 @@ import Foundation
 import os
 import SwiftUI
 import Core
-import os
 
 extension Notification.Name {
     /// Posted by `AIServiceManager` after the AI preset list has been written, so observers
@@ -26,20 +25,22 @@ public final class AIServiceManager: ObservableObject {
     @AppStorage("aiActiveProvider") public var activeProviderRaw: String = AIProviderType.apple.rawValue {
         willSet { objectWillChange.send() }
     }
-    // API key is stored in ~/.openclip/secrets.json via SecretStore.
-    @Published public var cloudAPIKey: String {
-        didSet {
-            if cloudAPIKey.isEmpty {
-                SecretStore.delete(account: Self.cloudAPIKeyAccount)
-            } else {
-                let didStore = SecretStore.set(cloudAPIKey, account: Self.cloudAPIKeyAccount)
-                if !didStore {
-                    Log.settings.error("Failed to persist cloud API key to SecretStore; reverting value.")
-                    cloudAPIKey = oldValue
-                }
-            }
-        }
+    public var cloudAPIKey: String {
+        guard let account = cloudCredentialAccount else { return "" }
+        return SecretStore.get(account: account) ?? ""
     }
+
+    func setCloudAPIKey(_ key: String, account: String) -> Bool {
+        objectWillChange.send()
+        let saved = key.isEmpty
+            ? SecretStore.delete(account: account)
+            : SecretStore.set(key, account: account)
+        if !saved {
+            Log.settings.error("Failed to update the cloud API key in SecretStore")
+        }
+        return saved
+    }
+
     @AppStorage("aiCloudService") public var cloudServiceRaw: String = "openai" {
         willSet { objectWillChange.send() }
     }
@@ -69,7 +70,7 @@ public final class AIServiceManager: ObservableObject {
         AIActionPreset(id: "proofread", title: String(localized: "Proofread"), prompt: String(localized: "Fix all spelling, punctuation, and grammatical errors while preserving the original wording, tone, and formatting"), isEnabled: true),
         AIActionPreset(id: "rewrite", title: String(localized: "Rewrite"), prompt: String(localized: "Rewrite to improve clarity, flow, and vocabulary while keeping the original meaning and language"), isEnabled: true),
         AIActionPreset(id: "summarize", title: String(localized: "Summarize"), prompt: String(localized: "Provide a concise bulleted summary capturing the key points"), isEnabled: true),
-        AIActionPreset(id: "explain", title: String(localized: "Explain"), prompt: String(localized: "Explain the core concept clearly and concisely in simple terms"), isEnabled: true),
+        AIActionPreset(id: "explain", title: String(localized: "Explain"), prompt: String(localized: "Search and analyze, then ELI25. Explain concisely in Chinese:"), isEnabled: true),
         AIActionPreset(id: "translate", title: String(localized: "Translate"), prompt: String(localized: "Translate the text accurately into natural English"), isEnabled: true),
         AIActionPreset(id: "fix_code", title: String(localized: "Fix Code"), prompt: String(localized: "Fix bugs, syntax errors, and logic issues in this code snippet. Return only the raw working code without markdown code blocks or explanations"), isEnabled: false),
         AIActionPreset(id: "make_shorter", title: String(localized: "Make Shorter"), prompt: String(localized: "Condense this text to be as concise as possible while keeping all essential information"), isEnabled: false),
@@ -108,11 +109,6 @@ public final class AIServiceManager: ObservableObject {
         }
     }
 
-    public var enabledPresets: [AIActionPreset] {
-        let list = presets.filter { $0.isEnabled }
-        return list.isEmpty ? [Self.defaultPresets[0]] : list
-    }
-
     public func updatePreset(_ updated: AIActionPreset) {
         var current = presets
         if let idx = current.firstIndex(where: { $0.id == updated.id }) {
@@ -137,25 +133,65 @@ public final class AIServiceManager: ObservableObject {
         presets = Self.defaultPresets
     }
 
-    /// Resolves the effective prompt for an AI preset.
-    public func promptForPreset(_ preset: AIActionPreset) -> String {
-        preset.prompt
+    private static let legacyCloudAPIKeyAccount = "aiCloudAPIKey"
+
+    var cloudCredentialAccount: String? {
+        Self.cloudCredentialAccount(for: cloudServiceProvider, customURL: cloudCustomURL)
     }
 
-    private static let cloudAPIKeyAccount = "aiCloudAPIKey"
+    private static func cloudCredentialAccount(for service: CloudServiceProvider, customURL: String) -> String? {
+        let baseURL = CloudAPIProvider.resolveBaseURL(provider: service, customBaseURL: customURL)
+        guard let url = URL(string: baseURL), let origin = CloudAPIProvider.origin(of: url) else { return nil }
+        return "\(legacyCloudAPIKeyAccount).\(service.rawValue).\(origin)"
+    }
+
+    var cloudProvider: CloudAPIProvider {
+        let service = cloudServiceProvider
+        let url = cloudCustomURL
+        let key = Self.cloudCredentialAccount(for: service, customURL: url).flatMap { SecretStore.get(account: $0) }
+        return CloudAPIProvider(apiKey: key ?? "", model: cloudModel, serviceProvider: service, customBaseURL: url)
+    }
 
     private init() {
-        // Load the API key from the SecretStore (~/.openclip/secrets.json)
-        if let stored = SecretStore.get(account: Self.cloudAPIKeyAccount) {
-            self.cloudAPIKey = stored
-        } else if let legacy = UserDefaults.standard.string(forKey: "aiCloudAPIKey"), !legacy.isEmpty {
-            if SecretStore.set(legacy, account: Self.cloudAPIKeyAccount) {
-                UserDefaults.standard.removeObject(forKey: "aiCloudAPIKey")
-            }
-            self.cloudAPIKey = legacy
-        } else {
-            self.cloudAPIKey = ""
+        migrateCloudAPIKey()
+        migrateExplainPrompt()
+    }
+
+    private func migrateCloudAPIKey() {
+        let legacyAccount = Self.legacyCloudAPIKeyAccount
+        let defaultsKey = UserDefaults.standard.string(forKey: legacyAccount)
+        let storedKey = SecretStore.get(account: legacyAccount)
+        guard let key = storedKey ?? defaultsKey, !key.isEmpty else { return }
+
+        // Keep the original scope even if the secrets file is temporarily unwritable.
+        let scopeKey = SettingKey<String?>("aiLegacyCloudCredentialAccount", defaultValue: nil)
+        let settings = DefaultSettingsStore.shared
+        let account = settings.get(scopeKey) ?? cloudCredentialAccount ?? ""
+        settings.set(scopeKey, value: account)
+        guard !account.isEmpty else { return }
+
+        if storedKey != nil {
+            guard SecretStore.move(from: legacyAccount, to: account) else { return }
+        } else if SecretStore.get(account: account) == nil {
+            guard SecretStore.set(key, account: account) else { return }
         }
+        UserDefaults.standard.removeObject(forKey: legacyAccount)
+    }
+
+    private func migrateExplainPrompt() {
+        guard !actionPresetsJSON.isEmpty else { return }
+        let previousPrompts = [
+            "Explain the core concept clearly and concisely in simple terms",
+            "用简单的语言清晰、简洁地解释核心概念",
+            "用簡單易懂的文字清晰簡潔地解釋核心概念",
+            "Expliquer le concept principal de manière claire, concise et en termes simples",
+            "核心となる概念をわかりやすい言葉で明確かつ簡潔に説明します"
+        ]
+        var saved = presets
+        guard let index = saved.firstIndex(where: { $0.id == "explain" && previousPrompts.contains($0.prompt) }),
+              let updated = Self.defaultPresets.first(where: { $0.id == "explain" }) else { return }
+        saved[index].prompt = updated.prompt
+        presets = saved
     }
 
     public var activeProviderType: AIProviderType {
@@ -200,7 +236,7 @@ public final class AIServiceManager: ObservableObject {
         case .ollama:
             return OllamaProvider(baseURL: ollamaURL, model: ollamaModel)
         case .cloud:
-            return CloudAPIProvider(apiKey: cloudAPIKey, model: cloudModel, serviceProvider: cloudServiceProvider, customBaseURL: cloudCustomURL)
+            return cloudProvider
         case .browser:
             return BrowserRedirectProvider(template: effectiveBrowserURLTemplate)
         }

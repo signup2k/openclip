@@ -5,10 +5,8 @@
 // producing action's icon or sparkles + title), a scrollable response body (error-styled when the
 // action failed), and a Copy/Paste footer (hidden on error; Paste hidden when the target app can't
 // paste). Any action whose resolved outcome is text renders here, not just AI presets.
-// Paste/Copy are explicit user requests routed through performCardEffect, so an explicit Paste
-// always pastes, and both dismiss the popup (Copy like Paste). The panel is key while the card
-// shows (Task 14) and the card owns the keys (SwiftUI .onKeyPress): Esc collapses, Return pastes,
-// Shift+Return copies — the controller-level key monitor stays observation-only in content mode.
+// The controller validates explicit Paste against the original selection. Copy and a completed
+// paste dismiss the card. The card owns Esc, Return, and Shift+Return while its panel is key.
 import SwiftUI
 
 // MARK: - Effective Theme Injection
@@ -60,7 +58,7 @@ public struct ResultCardView: View {
             VStack(spacing: 0) {
                 header
                 bodyScroll
-                if !payload.isError {
+                if allowsEffects {
                     footer
                 }
             }
@@ -77,8 +75,8 @@ public struct ResultCardView: View {
             return .handled
         }
         .onKeyPress(.return, phases: .down) { press in
-            // Return pastes (an explicit request, so it always pastes); Shift+Return copies.
-            // When the target can't paste the button is hidden, so Return falls back to copy.
+            guard allowsEffects else { return .ignored }
+            // Return follows the primary footer button, which is Copy when Paste is unavailable.
             if press.modifiers.contains(.shift) || canPaste == false {
                 onCopy()
             } else {
@@ -242,6 +240,8 @@ public struct ResultCardView: View {
     }
 
     // MARK: Footer
+
+    private var allowsEffects: Bool { !payload.isError }
 
     private var isCopyPrimary: Bool {
         canPaste == false

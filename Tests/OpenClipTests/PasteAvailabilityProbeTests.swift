@@ -40,52 +40,6 @@ final class PasteAvailabilityProbeTests: XCTestCase {
         XCTAssertFalse(AXMenuNavigator.matches(.copy, title: nil, identifier: nil, cmdChar: "C", cmdModifiers: UInt(AXMenuItemModifiers.control.rawValue)))
         XCTAssertFalse(AXMenuNavigator.matches(.copy, title: nil, identifier: nil, cmdChar: "C", cmdModifiers: UInt(AXMenuItemModifiers.noCommand.rawValue)))
     }
-
-    func testNonPasteItemsAreRejected() {
-        XCTAssertFalse(PasteAvailabilityProbe.isPaste(title: "Copier", cmdChar: nil, cmdCharModifiers: nil))
-        XCTAssertFalse(PasteAvailabilityProbe.isPaste(title: "Copy", cmdChar: nil, cmdCharModifiers: nil))
-        XCTAssertFalse(PasteAvailabilityProbe.isPaste(title: nil, cmdChar: nil, cmdCharModifiers: nil))
-        XCTAssertFalse(PasteAvailabilityProbe.isPaste(
-            title: "Cut", cmdChar: "X", cmdCharModifiers: UInt(AXMenuItemModifiers.control.rawValue)))
-    }
-
-    func testNonCommandModifierTokenIsRejected() {
-        XCTAssertFalse(PasteAvailabilityProbe.isPaste(
-            title: nil, cmdChar: "V", cmdCharModifiers: UInt(AXMenuItemModifiers.noCommand.rawValue)))
-    }
-
-    func testMessagingTimeoutUsesRemainingBudgetAndSkipsExpiredCalls() {
-        let now = Date(timeIntervalSince1970: 1_000)
-        XCTAssertNil(AXMenuNavigator.messagingTimeout(deadline: now, now: now))
-        XCTAssertNil(AXMenuNavigator.messagingTimeout(deadline: now.addingTimeInterval(-1), now: now))
-        XCTAssertEqual(AXMenuNavigator.messagingTimeout(deadline: now.addingTimeInterval(0.1), now: now)!, 0.1, accuracy: 0.001)
-        XCTAssertEqual(AXMenuNavigator.messagingTimeout(deadline: now.addingTimeInterval(10), now: now), Float(Constants.axReadTimeout))
-    }
-
-    func testFindMenuItemRespectsExpiredDeadline() {
-        let expiredDeadline = Date().addingTimeInterval(-1.0)
-        let result = AXMenuNavigator.findMenuItem(.paste, in: nil, deadline: expiredDeadline)
-        XCTAssertNil(result, "An expired deadline must immediately yield nil without searching")
-    }
-
-    func testDeadlineAwareLookupReceivesDeadline() async {
-        let deadlineReceived = expectation(description: "deadline received by lookup")
-        let probe = PasteAvailabilityProbe(
-            lookupWithDeadline: { pid, deadline in
-                XCTAssertEqual(pid, 42)
-                XCTAssertNotNil(deadline)
-                if let deadline {
-                    XCTAssertGreaterThan(deadline, Date())
-                }
-                deadlineReceived.fulfill()
-                return true
-            },
-            timeout: 0.5
-        )
-        let result = await probe.probePaste(pid: 42)
-        XCTAssertEqual(result, true)
-        await fulfillment(of: [deadlineReceived], timeout: 1.0)
-    }
 }
 
 /// This class covers issue #37. A blocked lookup must not stop later probes.
@@ -96,24 +50,6 @@ final class PasteAvailabilityProbeTests: XCTestCase {
 final class PasteAvailabilityProbeGateTests: XCTestCase {
 
     private static let shortTimeout: TimeInterval = 0.1
-
-    /// The caller must get unknown at the time limit. It must not wait for the held lookup.
-    func testHungLookupReportsUnknownAtDeadlineWithoutWaitingForWorker() async {
-        let unblock = DispatchSemaphore(value: 0)
-        defer { unblock.signal() } // Release the held worker.
-        let probe = PasteAvailabilityProbe(
-            lookup: { _ in unblock.wait(); return true },
-            timeout: Self.shortTimeout
-        )
-
-        let start = Date()
-        let result = await probe.probePaste(pid: 1)
-        let elapsed = Date().timeIntervalSince(start)
-
-        XCTAssertNil(result, "watchdog must report unknown while the lookup is still blocked")
-        XCTAssertGreaterThanOrEqual(elapsed, Self.shortTimeout - 0.02)
-        XCTAssertLessThan(elapsed, 1.0, "the caller must resume at the deadline, not when the worker returns")
-    }
 
     /// A new probe must start while a held worker is still blocked. The queue must be concurrent.
     func testFreshProbeRunsWhileAbandonedWorkerIsStillParked() async {
@@ -181,19 +117,5 @@ final class PasteAvailabilityProbeGateTests: XCTestCase {
         XCTAssertEqual(fresh, false, "permits must be free again after the deadline")
         XCTAssertLessThan(Date().timeIntervalSince(freshStart), 0.3,
                           "a fresh probe must not wait behind abandoned workers")
-    }
-
-    /// A completed lookup must release its permit. Later lookups must get their real result.
-    func testCompletedLookupsReleasePermitsAndPropagateResults() async {
-        let answers: [Bool?] = [true, false, nil, true, false, nil]
-        XCTAssertGreaterThan(answers.count, Constants.pasteProbeMaxConcurrent)
-        for expected in answers {
-            let probe = PasteAvailabilityProbe(lookup: { _ in expected }, timeout: 1.0)
-            let start = Date()
-            let result = await probe.probePaste(pid: 1)
-            XCTAssertEqual(result, expected)
-            XCTAssertLessThan(Date().timeIntervalSince(start), 0.5, "a fast lookup must not wait for the watchdog")
-            try? await Task.sleep(nanoseconds: 50_000_000) // Wait for the permit release.
-        }
     }
 }

@@ -153,6 +153,9 @@ public struct PopupSearchView: View {
         .onChange(of: scope?.parent.id) { _, _ in
             rebuildSearchIndex()
         }
+        .onChange(of: (scope?.children ?? catalog).map(\.id)) { _, _ in
+            rebuildSearchIndex()
+        }
         .onAppear {
             isFocused = true
         }

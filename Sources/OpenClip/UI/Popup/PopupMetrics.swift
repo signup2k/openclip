@@ -13,6 +13,16 @@ public enum PopupMetrics {
     public static let barButtonHeight: CGFloat = 29.0
     /// Corner radius for popup action bars and content cards (normalized baseline).
     public static let popupCornerRadius: CGFloat = 8.5
+    /// Radial targets stay close to the cursor and keep the largest supported scale below
+    /// the panel height cap, including its shadow inset.
+    public static let radialOuterRadius: CGFloat = 72
+    public static let radialInnerRadius: CGFloat = 30
+    public static let radialPageSize = 8
+
+    public static func radialPanelSize(for level: Int) -> CGSize {
+        let side = radialOuterRadius * 2 * scaleMultiplier(for: level) + popupShadowInset * 2
+        return CGSize(width: side, height: side)
+    }
     /// Corner radius for the action-search palette.
     public static let searchCornerRadius: CGFloat = 10.0
     /// Corner radius for floating toast bubbles.

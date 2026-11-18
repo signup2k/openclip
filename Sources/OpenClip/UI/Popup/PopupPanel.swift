@@ -22,6 +22,12 @@ public class PopupPanel: NSPanel {
     /// When true (search mode with results above the field), content-driven growth keeps the
     /// panel's bottom edge fixed and grows upward so the field never shifts.
     public var pinBottomEdgeOnResize: Bool = false
+    /// The cursor-centered placement to restore when search/content collapses back to a radial
+    /// menu. Hosting-view resizes funnel through setFrame, so restoration also covers late passes.
+    var radialActionFrame: NSRect?
+    /// Capture the display chosen for this session; `screen` can still refer to the previous
+    /// display while a reused panel is being moved across monitors.
+    var placementScreenBounds: CGRect?
     public enum HorizontalAnchor: Sendable {
         case none
         case center
@@ -72,12 +78,21 @@ public class PopupPanel: NSPanel {
 
         /// Pure hit-test rule (unit-testable without a live SwiftUI tree): only the area inside the
         /// shadow ring belongs to the popup.
-        public static func isInsideClickableRegion(point: NSPoint, bounds: NSRect) -> Bool {
-            bounds.insetBy(dx: PopupMetrics.popupShadowInset, dy: PopupMetrics.popupShadowInset).contains(point)
+        public static func isInsideClickableRegion(point: NSPoint, bounds: NSRect, isRadial: Bool = false) -> Bool {
+            let content = bounds.insetBy(dx: PopupMetrics.popupShadowInset, dy: PopupMetrics.popupShadowInset)
+            guard content.contains(point) else { return false }
+            if isRadial {
+                return hypot(point.x - content.midX, point.y - content.midY) <= min(content.width, content.height) / 2
+            }
+            return true
+        }
+
+        func isInsideClickableRegion(_ point: NSPoint) -> Bool {
+            Self.isInsideClickableRegion(point: point, bounds: bounds, isRadial: rootView.usesRadialLayout)
         }
 
         public override func isMousePoint(_ point: NSPoint, in rect: NSRect) -> Bool {
-            Self.isInsideClickableRegion(point: point, bounds: bounds)
+            isInsideClickableRegion(point)
         }
 
         public override func updateTrackingAreas() {
@@ -119,9 +134,13 @@ public class PopupPanel: NSPanel {
     /// anchored edge(s) before the frame is displayed. Pure origin moves (repositioning) and the
     /// first placement (zero-sized frame) pass through untouched.
     override public func setFrame(_ frameRect: NSRect, display flag: Bool) {
+        if let radialActionFrame, let content = contentView as? ContentView, content.rootView.usesRadialLayout {
+            super.setFrame(radialActionFrame, display: flag)
+            return
+        }
         var clamped = frameRect
         let heightWasClamped = clamped.size.height > PopupMetrics.popupMaxHeight
-        let activeScreenFrame = screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+        let activeScreenFrame = placementScreenBounds ?? screen?.visibleFrame ?? NSScreen.main?.visibleFrame
         if let screenFrame = activeScreenFrame {
             let maxWidth = max(0, screenFrame.width - PopupMetrics.popupPadding * 2)
             clamped.size.width = min(clamped.size.width, maxWidth)

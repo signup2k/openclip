@@ -38,6 +38,9 @@ public final class PopupModeStore: ObservableObject {
     /// The ID of the currently active group action whose sub-bar is visible.
     @Published public var activeSubGroupID: String? = nil
 
+    // The radial page currently rendered by SwiftUI, in sector order.
+    var radialPage: (layout: PopupRadialLayout, actions: [any Action])?
+
     public init() {}
 }
 

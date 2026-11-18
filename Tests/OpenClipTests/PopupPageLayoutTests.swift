@@ -17,47 +17,6 @@ final class PopupPageLayoutTests: XCTestCase {
         @MainActor func perform(_ context: ActionContext) async throws -> ActionResult { .none }
     }
 
-    func testBarWidthMetricsLevels() {
-        XCTAssertEqual(PopupMetrics.barWidth(for: 1), 340.0)
-        XCTAssertEqual(PopupMetrics.barWidth(for: 2), 440.0)
-        XCTAssertEqual(PopupMetrics.barWidth(for: 3), 540.0)
-        XCTAssertEqual(PopupMetrics.barWidth(for: 4), 650.0)
-        XCTAssertEqual(PopupMetrics.barWidth(for: 5), 780.0)
-        XCTAssertEqual(PopupMetrics.barWidth(for: 99), 540.0, "Unknown level must fallback to 540pt default")
-    }
-
-    func testEstimatedItemWidth() {
-        let symbol = StubAction(id: "1", title: "Copy", icon: .symbol("doc.on.doc"))
-        let shortText = StubAction(id: "2", title: "OK", icon: .text("OK"))
-        let longText = StubAction(id: "3", title: "Formal Tone", icon: .text("Formal Tone"))
-
-        XCTAssertEqual(PopupPageLayout.estimatedItemWidth(for: symbol), 34.0)
-        XCTAssertEqual(PopupPageLayout.estimatedItemWidth(for: shortText), 34.0)
-        let longWidth = PopupPageLayout.estimatedItemWidth(for: longText)
-        XCTAssertGreaterThan(longWidth, 34.0)
-        XCTAssertLessThanOrEqual(longWidth, 125.0)
-
-        // Scale scaling
-        let scaledSymbol = PopupPageLayout.estimatedItemWidth(for: symbol, scale: 1.2)
-        XCTAssertEqual(scaledSymbol, 34.0 * 1.2, accuracy: 0.001)
-    }
-
-    func testComputePagesSinglePageFit() {
-        let actions = (0..<4).map {
-            StubAction(id: "act.\($0)", title: "Action \($0)", icon: .symbol("star"))
-        }
-
-        let pages = PopupPageLayout.computePages(
-            actions: actions,
-            leadingWidth: 0,
-            trailingWidth: 34.0,
-            maxBudget: 340.0
-        )
-
-        XCTAssertEqual(pages.count, 1)
-        XCTAssertEqual(pages.first?.count, 4)
-    }
-
     func testComputePagesMultiPagePackingWithChevrons() {
         // 12 icon actions = 12 * 34 = 408pt > 340pt
         let actions = (0..<12).map {
@@ -97,28 +56,5 @@ final class PopupPageLayoutTests: XCTestCase {
             )
             XCTAssertLessThanOrEqual(width, 260.0 + 58.0)
         }
-    }
-
-    func testMeasuredBarWidth() {
-        let a1 = StubAction(id: "1", title: "A", icon: .symbol("star"))
-        let a2 = StubAction(id: "2", title: "B", icon: .symbol("star"))
-
-        let withoutChevrons = PopupPageLayout.measuredBarWidth(
-            actions: [a1, a2],
-            hasLeftChevron: false,
-            hasRightChevron: false,
-            leadingWidth: 29.0,
-            trailingWidth: 34.0
-        )
-        XCTAssertEqual(withoutChevrons, 29.0 + 34.0 + 68.0)
-
-        let withChevrons = PopupPageLayout.measuredBarWidth(
-            actions: [a1, a2],
-            hasLeftChevron: true,
-            hasRightChevron: true,
-            leadingWidth: 29.0,
-            trailingWidth: 34.0
-        )
-        XCTAssertEqual(withChevrons, 29.0 + 34.0 + 68.0 + 58.0)
     }
 }

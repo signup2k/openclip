@@ -115,6 +115,8 @@ public extension SettingKey where Value == String {
     /// Popup theme ("classic"/"glass") and shared appearance ("system"/"light"/"dark").
     static var popupTheme: SettingKey<String> { SettingKey<String>("popupTheme", defaultValue: "classic") }
     static var popupThemeColor: SettingKey<String> { SettingKey<String>("popupThemeColor", defaultValue: "system") }
+    /// Popup menu layout ("horizontal" | "radial"). Existing installations keep the horizontal bar.
+    static var popupLayout: SettingKey<String> { SettingKey<String>("popupLayout", defaultValue: "horizontal") }
     /// Popup horizontal alignment relative to cursor ("left" | "center" | "right").
     static var popupAlignment: SettingKey<String> { SettingKey<String>("popupAlignment", defaultValue: PopupBarAlignment.left.rawValue) }
     /// Popup vertical placement relative to cursor/selection ("auto" | "above" | "below").
@@ -132,4 +134,3 @@ public extension SettingKey where Value == String {
         SettingKey<String>("action.\(actionID).option.\(optionID)", defaultValue: defaultValue)
     }
 }
-

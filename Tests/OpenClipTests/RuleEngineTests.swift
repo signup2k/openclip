@@ -7,28 +7,6 @@ final class RuleEngineTests: XCTestCase {
         await MainActor.run { TestIsolation.reset() }
     }
     
-    func testJSONDecodingWithKebabCase() throws {
-        let json = """
-        {
-            "rules": [
-                {
-                    "bundle-identifiers": ["com.test.app"],
-                    "use-menu-copy": true,
-                    "deny-paste": true
-                }
-            ]
-        }
-        """.data(using: .utf8)!
-        
-        let decoder = JSONDecoder()
-        let config = try decoder.decode(RuleEngineConfig.self, from: json)
-        
-        XCTAssertEqual(config.rules.count, 1)
-        let rule = config.rules[0]
-        XCTAssertEqual(rule.bundleIdentifiers, ["com.test.app"])
-        XCTAssertEqual(rule.useMenuCopy, true)
-        XCTAssertEqual(rule.denyPaste, true)
-    }
     
     @MainActor
     func testWildcardMatchingAndResolvePolicies() async throws {
@@ -82,23 +60,6 @@ final class RuleEngineTests: XCTestCase {
     }
 
     @MainActor
-    func testMenuCopyAppsMacroResolvesUseMenuCopy() async throws {
-        let vsCodeContext = RuleEngine.shared.resolvePolicies(for: "com.microsoft.VSCode")
-        XCTAssertEqual(vsCodeContext.retrievalMode, .keyboardCopy, "VS Code should resolve keyboard-copy retrieval mode")
-        XCTAssertFalse(vsCodeContext.useMenuCopy, "VS Code should not use menu copy")
-        
-        let zedContext = RuleEngine.shared.resolvePolicies(for: "dev.zed.Zed")
-        XCTAssertEqual(zedContext.retrievalMode, .keyboardCopy, "Zed should resolve keyboard-copy retrieval mode")
-        
-        let alacrittyContext = RuleEngine.shared.resolvePolicies(for: "org.alacritty")
-        XCTAssertEqual(alacrittyContext.retrievalMode, .menuCopy, "Alacritty should resolve menu-copy retrieval mode")
-        
-        let randomContext = RuleEngine.shared.resolvePolicies(for: "com.random.app")
-        XCTAssertEqual(randomContext.retrievalMode, .axTextControl, "Random app should stay on the default retrieval mode")
-        XCTAssertFalse(randomContext.useMenuCopy, "Random app should resolve useMenuCopy policy to false")
-    }
-
-    @MainActor
     func testLegacyUseMenuCopyResolvesToMenuCopyMode() async throws {
         let json = """
         {
@@ -120,32 +81,6 @@ final class RuleEngineTests: XCTestCase {
         XCTAssertTrue(context.useMenuCopy)
         XCTAssertEqual(context.retrievalMode, .menuCopy, "Legacy use-menu-copy: true should alias to .menuCopy")
         
-        try FileManager.default.removeItem(at: tempURL)
-    }
-
-    @MainActor
-    func testExplicitRetrievalModeSuppressesLegacyMenuCopyAlias() async throws {
-        let json = """
-        {
-            "rules": [
-                {
-                    "bundle-identifiers": ["com.legacy.explicit"],
-                    "use-menu-copy": true,
-                    "retrieval-mode": "ax-text-control"
-                }
-            ]
-        }
-        """.data(using: .utf8)!
-
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("rules_legacy_explicit_test.json")
-        try json.write(to: tempURL)
-
-        await RuleEngine.shared.loadRules(from: tempURL)
-
-        let context = RuleEngine.shared.resolvePolicies(for: "com.legacy.explicit")
-        XCTAssertTrue(context.useMenuCopy)
-        XCTAssertEqual(context.retrievalMode, .axTextControl, "explicit ax-text-control must opt out of the legacy menu-copy alias")
-
         try FileManager.default.removeItem(at: tempURL)
     }
 

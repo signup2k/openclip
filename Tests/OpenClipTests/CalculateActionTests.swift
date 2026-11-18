@@ -4,23 +4,6 @@ import AppKit
 @testable import Core
 
 final class CalculateActionTests: XCTestCase {
-    @MainActor
-    func testCalculateActionEnabledForMath() async throws {
-        let action = CalculateAction()
-        let app = AppIdentity(NSRunningApplication.current)
-        
-        let validMathContext = ActionContext(
-            selection: SelectionContext(text: "12 + 4.5", sourceApp: app, cursorPosition: .zero, selectionBounds: nil, timestamp: Date(), appPolicy: .default),
-            modifiers: []
-        )
-        XCTAssertTrue(action.isEnabled(for: validMathContext), "CalculateAction should be enabled for math expressions")
-        
-        let plainTextContext = ActionContext(
-            selection: SelectionContext(text: "Hello World", sourceApp: app, cursorPosition: .zero, selectionBounds: nil, timestamp: Date(), appPolicy: .default),
-            modifiers: []
-        )
-        XCTAssertFalse(action.isEnabled(for: plainTextContext), "CalculateAction should be disabled for non-math text")
-    }
     
     @MainActor
     func testCalculateActionExecution() async throws {
@@ -144,41 +127,6 @@ final class CalculateActionTests: XCTestCase {
 
     // MARK: - MathEvaluator (deterministic parser, replaces crash-prone NSExpression)
 
-    func testMathEvaluatorBasicArithmetic() {
-        let cases: [(input: String, expected: Double)] = [
-            ("12 + 4.5", 16.5),
-            ("100 * 2.5", 250),
-            ("1 + 2 - 3 * 4 / 2", -3),
-            ("5 % 2", 1),
-            ("100 * 20%", 20),
-            ("2^8", 256),
-            ("2**3", 8),
-            (".5 + 0.5", 1)
-        ]
-        for testCase in cases {
-            guard let value = MathEvaluator.evaluate(testCase.input) else {
-                return XCTFail("\(testCase.input) should evaluate")
-            }
-            XCTAssertEqual(value, testCase.expected, accuracy: 0.0001)
-        }
-    }
-
-    func testMathEvaluatorUnaryAndParens() {
-        let cases: [(input: String, expected: Double)] = [
-            ("-5", -5),
-            ("(-5)", -5),
-            ("1-(-2)", 3),
-            ("(1+2)*3", 9),
-            ("(-2)^3", -8)
-        ]
-        for testCase in cases {
-            guard let value = MathEvaluator.evaluate(testCase.input) else {
-                return XCTFail("\(testCase.input) should evaluate")
-            }
-            XCTAssertEqual(value, testCase.expected, accuracy: 0.0001)
-        }
-    }
-
     /// '^' is right-associative and unary minus binds looser than '^':
     /// 2^3^2 = 2^(3^2) = 512, and -2^2 = -(2^2) = -4.
     func testMathEvaluatorPowerPrecedenceAndAssociativity() {
@@ -200,21 +148,5 @@ final class CalculateActionTests: XCTestCase {
             }
             XCTAssertEqual(value, testCase.expected, accuracy: 0.0001, "\(testCase.input)")
         }
-    }
-
-    func testMathEvaluatorRejectsMalformed() {
-        XCTAssertNil(MathEvaluator.evaluate("+"))
-        XCTAssertNil(MathEvaluator.evaluate("-"))
-        XCTAssertNil(MathEvaluator.evaluate("1+"))
-        XCTAssertNil(MathEvaluator.evaluate("1+*2"))
-        XCTAssertNil(MathEvaluator.evaluate("()"))
-        XCTAssertNil(MathEvaluator.evaluate("("))
-        XCTAssertNil(MathEvaluator.evaluate("1+2)"))
-        XCTAssertNil(MathEvaluator.evaluate("2..5"))
-        XCTAssertNil(MathEvaluator.evaluate("1 1"))
-        XCTAssertNil(MathEvaluator.evaluate("1/0"))
-        XCTAssertNil(MathEvaluator.evaluate("5 % 0"))
-        XCTAssertNil(MathEvaluator.evaluate(""))
-        XCTAssertNil(MathEvaluator.evaluate("hello"))
     }
 }

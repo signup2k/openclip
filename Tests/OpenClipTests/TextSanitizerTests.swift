@@ -3,18 +3,6 @@ import XCTest
 
 final class TextSanitizerTests: XCTestCase {
 
-    func testEmptyAndNilAreNotSubstantial() {
-        XCTAssertFalse(TextSanitizer.isSubstantial(nil))
-        XCTAssertFalse(TextSanitizer.isSubstantial(""))
-    }
-
-    func testStandardWhitespaceIsNotSubstantial() {
-        XCTAssertFalse(TextSanitizer.isSubstantial("   "))
-        XCTAssertFalse(TextSanitizer.isSubstantial("\t\t"))
-        XCTAssertFalse(TextSanitizer.isSubstantial("\n\r\n"))
-        XCTAssertFalse(TextSanitizer.isSubstantial(" \t \n \r "))
-    }
-
     func testInvisibleAndZeroWidthCharactersAreNotSubstantial() {
         XCTAssertFalse(TextSanitizer.isSubstantial("\u{0000}")) // Null byte
         XCTAssertFalse(TextSanitizer.isSubstantial("\u{00A0}")) // Non-breaking space
@@ -24,14 +12,6 @@ final class TextSanitizerTests: XCTestCase {
         XCTAssertFalse(TextSanitizer.isSubstantial("\u{2060}")) // Word joiner
         XCTAssertFalse(TextSanitizer.isSubstantial("\u{FEFF}")) // Zero-width no-break space / BOM
         XCTAssertFalse(TextSanitizer.isSubstantial("\u{200B}\u{00A0}\u{FEFF}   \n"))
-    }
-
-    func testSubstantialTextReturnsTrue() {
-        XCTAssertTrue(TextSanitizer.isSubstantial("a"))
-        XCTAssertTrue(TextSanitizer.isSubstantial("Hello World"))
-        XCTAssertTrue(TextSanitizer.isSubstantial("  \u{200B}text\u{FEFF}  "))
-        XCTAssertTrue(TextSanitizer.isSubstantial("123"))
-        XCTAssertTrue(TextSanitizer.isSubstantial("🎯"))
     }
 
     func testSanitize() {

@@ -2381,6 +2381,34 @@
         }
       }
     },
+    "Choose an action": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择动作"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選擇動作"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir une action"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクションを選択"
+          }
+        }
+      }
+    },
     "Choose icon": {
       "localizations": {
         "zh-Hans": {
@@ -2993,6 +3021,62 @@
           "stringUnit": {
             "state": "translated",
             "value": "応答をクリップボードにコピーして閉じる (⏎)"
+          }
+        }
+      }
+    },
+    "Could not remove the saved API key.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法删除已保存的 API 密钥。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法刪除已儲存的 API 金鑰。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de supprimer la clé API enregistrée."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存済みの API キーを削除できませんでした。"
+          }
+        }
+      }
+    },
+    "Could not save the API key.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法保存 API 密钥。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法儲存 API 金鑰。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’enregistrer la clé API."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API キーを保存できませんでした。"
           }
         }
       }
@@ -5181,6 +5265,34 @@
         }
       }
     },
+    "Horizontal": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "横向"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "橫向"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Horizontal"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "横並び"
+          }
+        }
+      }
+    },
     "Horizontal Position": {
       "localizations": {
         "zh-Hans": {
@@ -6017,6 +6129,34 @@
           "stringUnit": {
             "state": "translated",
             "value": "メニューバーアイコン"
+          }
+        }
+      }
+    },
+    "Menu Layout": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "菜单布局"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選單佈局"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disposition du menu"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メニュー配置"
           }
         }
       }
@@ -8373,6 +8513,62 @@
         }
       }
     },
+    "Radial": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "圆盘"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "圓盤"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Circulaire"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "円形"
+          }
+        }
+      }
+    },
+    "Radial menus open around the pointer. Move into a sector, then click.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "圆盘菜单以鼠标为中心弹出。移入扇区后，点击执行。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "圓盤選單以滑鼠為中心彈出。移入扇區後，點擊執行。"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le menu circulaire s’ouvre autour du pointeur. Placez-le dans un secteur, puis cliquez."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "円形メニューはポインタを中心に開きます。扇形の領域に移動してクリックしてください。"
+          }
+        }
+      }
+    },
     "Release Notes": {
       "localizations": {
         "zh-Hans": {
@@ -9405,6 +9601,34 @@
           "stringUnit": {
             "state": "translated",
             "value": "すべてのアクションを検索"
+          }
+        }
+      }
+    },
+    "Search and analyze, then ELI25. Explain concisely in Chinese:": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜索、分析后，ELI25，用中文简洁解释："
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜尋、分析後，ELI25，用中文簡潔解釋："
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rechercher et analyser, puis ELI25. Expliquer brièvement en chinois :"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "検索・分析したうえで、ELI25。中国語で簡潔に説明してください："
           }
         }
       }

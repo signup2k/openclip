@@ -85,11 +85,31 @@ public final class CloudAPIProvider: AIProvider {
     }
 
     public static func resolveBaseURL(provider: CloudServiceProvider, customBaseURL: String = "") -> String {
-        let trimmed = customBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            return trimmed
+        provider == .custom
+            ? customBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            : provider.defaultBaseURL
+    }
+
+    nonisolated static func origin(of url: URL) -> String? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = url.host(percentEncoded: true)?.lowercased(), !host.isEmpty else { return nil }
+        let port = url.port ?? (scheme == "https" ? 443 : 80)
+        return "\(scheme)://\(host):\(port)"
+    }
+
+    private static let session = URLSession(configuration: .default, delegate: SameOriginRedirects(), delegateQueue: nil)
+
+    private final class SameOriginRedirects: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+            guard let source = task.originalRequest?.url, let destination = request.url,
+                  let origin = CloudAPIProvider.origin(of: source),
+                  origin == CloudAPIProvider.origin(of: destination) else {
+                completionHandler(nil)
+                return
+            }
+            completionHandler(request)
         }
-        return provider.defaultBaseURL
     }
 
     public var effectiveBaseURL: String {
@@ -132,7 +152,7 @@ public final class CloudAPIProvider: AIProvider {
                     )
                     request.httpBody = try JSONEncoder().encode(body)
 
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    let (bytes, response) = try await Self.session.bytes(for: request)
                     guard let http = response as? HTTPURLResponse else {
                         continuation.finish(throwing: AIError.invalidResponse)
                         return
@@ -210,7 +230,7 @@ public final class CloudAPIProvider: AIProvider {
                     )
                     request.httpBody = try JSONEncoder().encode(body)
 
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    let (bytes, response) = try await Self.session.bytes(for: request)
                     guard let http = response as? HTTPURLResponse else {
                         continuation.finish(throwing: AIError.invalidResponse)
                         return
@@ -284,7 +304,7 @@ public final class CloudAPIProvider: AIProvider {
                     )
                     request.httpBody = try JSONEncoder().encode(body)
 
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    let (bytes, response) = try await Self.session.bytes(for: request)
                     guard let http = response as? HTTPURLResponse else {
                         continuation.finish(throwing: AIError.invalidResponse)
                         return
@@ -349,7 +369,7 @@ public final class CloudAPIProvider: AIProvider {
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw AIError.invalidResponse
         }
@@ -385,7 +405,7 @@ public final class CloudAPIProvider: AIProvider {
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw AIError.invalidResponse
         }
@@ -410,7 +430,7 @@ public final class CloudAPIProvider: AIProvider {
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw AIError.invalidResponse
         }

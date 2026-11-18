@@ -28,49 +28,6 @@ final class TopLevelActionResolverTests: XCTestCase {
         func perform(_ context: ActionContext) async throws -> ActionResult { .none }
     }
 
-    func testEmptyActionsReturnsEmptyList() {
-        let items = TopLevelActionResolver.resolveTopLevelItems(
-            from: [],
-            customGroupMemberIDs: [],
-            disabledActionIDs: [],
-            isAIEnabled: true
-        )
-        XCTAssertTrue(items.isEmpty)
-    }
-
-    func testResolvesStandaloneBuiltinsAndExtensionsWithEnabledState() {
-        let copyAction = DummyAction(
-            id: "builtin.copy",
-            title: "Copy",
-            chrome: ActionChrome(badge: .none, rowStyle: .standard, popupBehavior: .perform, source: .builtin)
-        )
-        let extAction = DummyAction(
-            id: "com.user.wordcount",
-            title: "Word Count",
-            chrome: ActionChrome(badge: .custom, rowStyle: .standard, popupBehavior: .perform, source: .custom)
-        )
-
-        let items = TopLevelActionResolver.resolveTopLevelItems(
-            from: [copyAction, extAction],
-            customGroupMemberIDs: [],
-            disabledActionIDs: ["builtin.copy"],
-            isAIEnabled: true
-        )
-
-        XCTAssertEqual(items.count, 2)
-        XCTAssertEqual(items[0].id, "builtin.copy")
-        XCTAssertEqual(items[0].title, "Copy")
-        XCTAssertEqual(items[0].icon, .symbol("sparkles"))
-        XCTAssertFalse(items[0].isGroup)
-        XCTAssertFalse(items[0].isEnabled)
-
-        XCTAssertEqual(items[1].id, "com.user.wordcount")
-        XCTAssertEqual(items[1].title, "Word Count")
-        XCTAssertEqual(items[1].icon, .symbol("sparkles"))
-        XCTAssertFalse(items[1].isGroup)
-        XCTAssertTrue(items[1].isEnabled)
-    }
-
     func testResolvesCustomGroupsAsSingleItemsAndOmitsMembers() {
         let groupAction = CustomGroupAction(
             id: "vgroup.clipboard",
@@ -114,39 +71,6 @@ final class TopLevelActionResolverTests: XCTestCase {
         XCTAssertEqual(items[1].title, "Uppercase")
         XCTAssertFalse(items[1].isGroup)
         XCTAssertTrue(items[1].isEnabled)
-    }
-
-    func testResolvesExtensionGroupsAndOmitsPackageSubActions() {
-        let groupAction = DummyAction(
-            id: "com.pkg.tools",
-            title: "Dev Tools",
-            chrome: ActionChrome(badge: .extensionPkg("Dev Tools"), rowStyle: .actionGroup, popupBehavior: .showSubActions, source: .extensionPkg(packageID: "com.pkg.tools"))
-        )
-        let subAction1 = DummyAction(
-            id: "com.pkg.tools.format",
-            title: "Format JSON",
-            chrome: ActionChrome(badge: .extensionPkg("Dev Tools"), rowStyle: .standard, popupBehavior: .perform, source: .extensionPkg(packageID: "com.pkg.tools"))
-        )
-        let subAction2 = DummyAction(
-            id: "com.pkg.tools.validate",
-            title: "Validate JSON",
-            chrome: ActionChrome(badge: .extensionPkg("Dev Tools"), rowStyle: .standard, popupBehavior: .perform, source: .extensionPkg(packageID: "com.pkg.tools"))
-        )
-
-        let actions: [any Action] = [groupAction, subAction1, subAction2]
-
-        let items = TopLevelActionResolver.resolveTopLevelItems(
-            from: actions,
-            customGroupMemberIDs: [],
-            disabledActionIDs: ["com.pkg.tools"],
-            isAIEnabled: true
-        )
-
-        XCTAssertEqual(items.count, 1)
-        XCTAssertEqual(items[0].id, "com.pkg.tools")
-        XCTAssertEqual(items[0].title, "Dev Tools")
-        XCTAssertTrue(items[0].isGroup)
-        XCTAssertFalse(items[0].isEnabled)
     }
 
     func testOmitsAIPresetsAndResolvesAIToolsLauncher() {

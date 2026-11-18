@@ -24,14 +24,6 @@ public enum SecretStore {
         _cache = nil
     }
 
-    /// Resets the store with specific contents for test isolation.
-    public static func resetForTesting(with initialData: [String: String] = [:]) {
-        lock.lock()
-        defer { lock.unlock() }
-        _cache = initialData
-        saveToDiskLocked(initialData)
-    }
-
     public static func get(account: String) -> String? {
         lock.lock()
         defer { lock.unlock() }
@@ -56,6 +48,18 @@ public enum SecretStore {
         defer { lock.unlock() }
         guard var store = loadCacheLocked() else { return false }
         guard store.removeValue(forKey: account) != nil else { return true }
+        guard saveToDiskLocked(store) else { return false }
+        _cache = store
+        return true
+    }
+
+    /// Moves a legacy secret in one write, preserving any credential already saved in the new scope.
+    static func move(from oldAccount: String, to newAccount: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard var store = loadCacheLocked() else { return false }
+        guard let value = store.removeValue(forKey: oldAccount) else { return true }
+        store[newAccount] = store[newAccount] ?? value
         guard saveToDiskLocked(store) else { return false }
         _cache = store
         return true

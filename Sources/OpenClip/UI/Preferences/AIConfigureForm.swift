@@ -11,6 +11,7 @@ public struct AIConfigureForm: View {
 
     @State private var fetchedCloudModels: [String] = []
     @State private var isFetchingCloudModels: Bool = false
+    @State private var cloudKeyError: String?
     @State private var cloudFetchError: String? = nil
     @State private var cloudFetchGeneration: Int = 0
 
@@ -64,8 +65,29 @@ public struct AIConfigureForm: View {
                             .textFieldStyle(.roundedBorder)
                     }
 
-                    SecureField("API Key", text: $aiManager.cloudAPIKey)
-                        .textFieldStyle(.roundedBorder)
+                    let credentialAccount = aiManager.cloudCredentialAccount
+                    SecureField("API Key", text: Binding(
+                        get: { aiManager.cloudAPIKey },
+                        set: { key in
+                            guard let credentialAccount, credentialAccount == aiManager.cloudCredentialAccount else { return }
+                            if aiManager.setCloudAPIKey(key, account: credentialAccount) {
+                                cloudKeyError = nil
+                            } else {
+                                cloudKeyError = key.isEmpty
+                                    ? String(localized: "Could not remove the saved API key.")
+                                    : String(localized: "Could not save the API key.")
+                            }
+                        }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(credentialAccount == nil)
+                    .id(credentialAccount)
+
+                    if let cloudKeyError {
+                        Text(cloudKeyError)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
 
                     HStack(spacing: 8) {
                         let defaultModels = aiManager.cloudServiceProvider.defaultModels
@@ -145,48 +167,55 @@ public struct AIConfigureForm: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
+        .onChange(of: cloudFetchSettings) { _, _ in
+            cloudFetchGeneration += 1
+            isFetchingCloudModels = false
+            fetchedCloudModels = []
+            cloudFetchError = nil
+        }
+        .onChange(of: ollamaFetchSettings) { _, _ in
+            ollamaFetchGeneration += 1
+            isFetchingOllamaModels = false
+            fetchedOllamaModels = []
+            ollamaFetchError = nil
+        }
+        .onChange(of: aiManager.cloudCredentialAccount) { _, _ in
+            cloudKeyError = nil
+        }
+    }
+
+    private var cloudFetchSettings: [String] {
+        [aiManager.activeProviderRaw, aiManager.cloudServiceRaw, aiManager.cloudCustomURL, aiManager.cloudAPIKey]
+    }
+
+    private var ollamaFetchSettings: [String] {
+        [aiManager.activeProviderRaw, aiManager.ollamaURL]
     }
 
     private func fetchModels() {
         cloudFetchGeneration += 1
         let currentGeneration = cloudFetchGeneration
-        let targetProvider = aiManager.cloudServiceProvider
-        let targetCustomURL = aiManager.cloudCustomURL
-        let targetAPIKey = aiManager.cloudAPIKey
+        let settings = cloudFetchSettings
+        let provider = aiManager.cloudProvider
 
         isFetchingCloudModels = true
         cloudFetchError = nil
         Task {
+            defer {
+                if currentGeneration == cloudFetchGeneration { isFetchingCloudModels = false }
+            }
             do {
                 let models = try await CloudAPIProvider.fetchAvailableModels(
-                    apiKey: targetAPIKey,
-                    provider: targetProvider,
-                    customBaseURL: targetCustomURL
+                    apiKey: provider.apiKey, provider: provider.serviceProvider, customBaseURL: provider.customBaseURL
                 )
-                await MainActor.run {
-                    guard currentGeneration == self.cloudFetchGeneration,
-                          aiManager.cloudServiceProvider == targetProvider,
-                          aiManager.cloudCustomURL == targetCustomURL,
-                          aiManager.cloudAPIKey == targetAPIKey else {
-                        return
-                    }
-                    self.fetchedCloudModels = models
-                    self.isFetchingCloudModels = false
-                    if let first = models.first, !models.contains(aiManager.cloudModel) {
-                        aiManager.cloudModel = first
-                    }
+                guard currentGeneration == cloudFetchGeneration, settings == cloudFetchSettings else { return }
+                fetchedCloudModels = models
+                if let first = models.first, !models.contains(aiManager.cloudModel) {
+                    aiManager.cloudModel = first
                 }
             } catch {
-                await MainActor.run {
-                    guard currentGeneration == self.cloudFetchGeneration,
-                          aiManager.cloudServiceProvider == targetProvider,
-                          aiManager.cloudCustomURL == targetCustomURL,
-                          aiManager.cloudAPIKey == targetAPIKey else {
-                        return
-                    }
-                    self.cloudFetchError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                    self.isFetchingCloudModels = false
-                }
+                guard currentGeneration == cloudFetchGeneration, settings == cloudFetchSettings else { return }
+                cloudFetchError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }
     }
@@ -194,33 +223,25 @@ public struct AIConfigureForm: View {
     private func fetchOllamaModels() {
         ollamaFetchGeneration += 1
         let currentGeneration = ollamaFetchGeneration
-        let targetURL = aiManager.ollamaURL
+        let settings = ollamaFetchSettings
+        let url = aiManager.ollamaURL
 
         isFetchingOllamaModels = true
         ollamaFetchError = nil
         Task {
+            defer {
+                if currentGeneration == ollamaFetchGeneration { isFetchingOllamaModels = false }
+            }
             do {
-                let models = try await OllamaProvider.fetchAvailableModels(baseURL: targetURL)
-                await MainActor.run {
-                    guard currentGeneration == self.ollamaFetchGeneration,
-                          aiManager.ollamaURL == targetURL else {
-                        return
-                    }
-                    self.fetchedOllamaModels = models
-                    self.isFetchingOllamaModels = false
-                    if let first = models.first, !models.contains(aiManager.ollamaModel) {
-                        aiManager.ollamaModel = first
-                    }
+                let models = try await OllamaProvider.fetchAvailableModels(baseURL: url)
+                guard currentGeneration == ollamaFetchGeneration, settings == ollamaFetchSettings else { return }
+                fetchedOllamaModels = models
+                if let first = models.first, !models.contains(aiManager.ollamaModel) {
+                    aiManager.ollamaModel = first
                 }
             } catch {
-                await MainActor.run {
-                    guard currentGeneration == self.ollamaFetchGeneration,
-                          aiManager.ollamaURL == targetURL else {
-                        return
-                    }
-                    self.ollamaFetchError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                    self.isFetchingOllamaModels = false
-                }
+                guard currentGeneration == ollamaFetchGeneration, settings == ollamaFetchSettings else { return }
+                ollamaFetchError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }
     }

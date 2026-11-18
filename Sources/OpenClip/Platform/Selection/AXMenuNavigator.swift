@@ -81,10 +81,12 @@ public struct AXMenuNavigator {
     /// Presses the requested menu item if it can be found and is enabled.
     /// Sets a messaging timeout on the menu item before AXPress, and bounds search against `deadline`.
     @discardableResult
-    public static func press(_ command: MenuCommand, in app: AXUIElement?, deadline: Date? = nil) -> Bool {
+    public static func press(_ command: MenuCommand, in app: AXUIElement?, deadline: Date? = nil,
+                             canPress: () -> Bool = { true }) -> Bool {
         guard let item = findMenuItem(command, in: app, requireEnabled: true, deadline: deadline) else { return false }
         guard let timeout = messagingTimeout(deadline: deadline) else { return false }
         AXUIElementSetMessagingTimeout(item, timeout)
+        guard canPress(), deadline.map({ Date() < $0 }) ?? true else { return false }
         return AXUIElementPerformAction(item, kAXPressAction as CFString) == .success
     }
 

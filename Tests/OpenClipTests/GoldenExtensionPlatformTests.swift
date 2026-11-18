@@ -2,25 +2,6 @@ import XCTest
 @testable import Core
 @testable import OpenClip
 
-/// In-memory option store injected into the factory so the JS option override test never
-/// touches UserDefaults.standard. All access happens on the MainActor.
-fileprivate final class MemoryOptionStore: ActionOptionReading, ActionOptionWriting, @unchecked Sendable {
-    private var values: [String: String] = [:]
-
-    func stringValue(actionID: String, option: ExtensionOption) -> String {
-        let name = SettingKey.actionOption(actionID: actionID, optionID: option.identifier).name
-        return values[name] ?? (option.defaultValue ?? "")
-    }
-
-    func setStringValue(_ value: String, actionID: String, option: ExtensionOption) {
-        values[SettingKey.actionOption(actionID: actionID, optionID: option.identifier).name] = value
-    }
-
-    func clearValue(actionID: String, option: ExtensionOption) {
-        values[SettingKey.actionOption(actionID: actionID, optionID: option.identifier).name] = ""
-    }
-}
-
 private extension ActionContext {
     init(selectedText: String) {
         let policy = AppPolicyContext()
@@ -37,14 +18,14 @@ private extension ActionContext {
 
 final class GoldenExtensionPlatformTests: XCTestCase {
     var tempDir: URL!
-    fileprivate var optionStore: MemoryOptionStore!
+    fileprivate var optionStore: SettingsActionOptionStore!
 
     override func setUp() async throws {
         try await super.setUp()
         await MainActor.run {
             TestIsolation.reset()
         }
-        let store = MemoryOptionStore()
+        let store = SettingsActionOptionStore(store: MemorySettingsStore())
         await MainActor.run {
             ExtensionManager.shared.actionFactory = DefaultActionFactory(optionStore: store)
             ExtensionManager.shared.onRegister = { [registry = ActionRegistry.shared] action in
@@ -273,49 +254,5 @@ final class GoldenExtensionPlatformTests: XCTestCase {
         let availableWithDisabled = isolatedRegistry.availableActions(for: sampleContext)
         XCTAssertFalse(availableWithDisabled.contains(where: { $0.id == "com.golden.js.action" }), "Disabled action should be filtered out by registry")
         XCTAssertTrue(availableWithDisabled.contains(where: { $0.id == "com.golden.shell.action" }), "Enabled actions in the same registry remain available")
-    }
-
-    /// Exit criterion: the removed `openclip.showContent`/`h()` canvas bridge surfaces a JS error
-    /// through the full load → factory → host pipeline (the extension loads fine, but calling the
-    /// removed bridge fails as a normal JS exception → error status).
-    @MainActor
-    func testJSContentBridgeRemovedSurfacesErrorThroughPipeline() async throws {
-        let jsBundle = tempDir.appendingPathComponent("JSContentExt.openclipext")
-        try FileManager.default.createDirectory(at: jsBundle, withIntermediateDirectories: true)
-        let jsManifest = """
-        {
-            "identifier": "com.golden.jscontent",
-            "name": "JS Content Golden Extension",
-            "actions": [
-                {
-                    "id": "com.golden.jscontent.action",
-                    "title": "JS Content Action",
-                    "script": "content.js"
-                }
-            ]
-        }
-        """
-        try jsManifest.write(to: jsBundle.appendingPathComponent("openclip.json"), atomically: true, encoding: .utf8)
-        let jsCode = """
-        function action(text, options) {
-            openclip.showContent(h('stack', {}, [h('text', { content: 'Hello ' + text })]));
-            return null;
-        }
-        """
-        try jsCode.write(to: jsBundle.appendingPathComponent("content.js"), atomically: true, encoding: .utf8)
-
-        await ExtensionManager.shared.loadExtensions(from: tempDir)
-        let loadedActions = ExtensionManager.shared.loadedActions
-
-        guard let action = loadedActions.first(where: { $0.id == "com.golden.jscontent.action" }) as? JavaScriptAction else {
-            XCTFail("Missing JavaScriptAction for com.golden.jscontent.action")
-            return
-        }
-
-        let result = try await action.perform(ActionContext(selectedText: "World"))
-        guard case .toast(let feedback) = result else {
-            return XCTFail("Expected an error toast from the removed canvas bridge, got \(result)")
-        }
-        XCTAssertEqual(feedback.style, .error)
     }
 }

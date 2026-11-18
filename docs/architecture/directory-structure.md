@@ -96,8 +96,7 @@ Sources/
 │   │   ├── BrowserDetector.swift             # Browser bundle ID classifier
 │   │   ├── Constants.swift                   # Domain/runtime constants (timeouts, key codes, env vars, manifest keys) — no UI sizing
 │   │   ├── SelectionContext.swift            # Selection snapshot context
-│   │   ├── SelectionMonitoring.swift         # Selection monitor protocol
-│   │   ├── TextRetrieving.swift              # Text retrieval protocol
+│   │   ├── TextResult.swift                  # Text, bounds, and rich selection representations
 │   │   └── TextSanitizer.swift               # Whitespace & zero-width character sanitization
 │   ├── Settings/                             # Settings subsystem
 │   │   ├── ActionOptionStore.swift           # ActionOptionReading & ActionOptionWriting protocols + SettingsActionOptionStore
@@ -156,7 +155,6 @@ Sources/
     │   ├── InstalledAppsScanner.swift        # Running and installed app scanner
     │   ├── LaunchAtLoginManager.swift        # Login item manager (SMAppService; persisted state via SettingKey.startAtLogin)
     │   ├── MacSelectionMonitor.swift         # Global accessibility selection monitor
-    │   ├── MacTextRetriever.swift            # TextRetrieving facade over SelectionRetrievalCoordinator
     │   ├── OnceResume.swift                  # Exactly-once continuation resume gate (AX read + AppleScript deadline races)
     │   ├── PasteAvailabilityProbe.swift      # AX probe walking Edit ▸ Paste menu items
     │   ├── PasteboardCopyEngine.swift        # Transient pasteboard archive-and-restore copy engine
@@ -178,7 +176,6 @@ Sources/
     │   │   ├── AXMenuNavigator.swift         # Accessibility menu traversal for Edit ▸ Copy/Paste
     │   │   ├── AXTextControlStrategy.swift   # kAXSelectedText read for native text controls
     │   │   ├── AXWebAreaStrategy.swift       # WebKit marker-range read (settle-retry lives in the coordinator)
-    │   │   ├── BrowserScriptStrategy.swift   # AppleScript-bridge page-selection read (Safari/Chromium/Firefox/Arc) + URL
     │   │   ├── CursorClassifier.swift        # Cursor image → CursorClass
     │   │   └── SelectionRetrievalCoordinator.swift # Gate + mode routing + inspect watchdog + deadline-capped Edit ▸ Copy press
     │   └── UnifiedIconProvider.swift         # Unified icon loader and cache
@@ -222,7 +219,7 @@ Sources/
         │   ├── SearchHoverSupport.swift      # Search-palette hover-target/frame preference keys
         │   ├── SubBarPanel.swift             # Sub-action menu floating NSPanel
         │   ├── SubBarPanelController.swift   # Controller managing the sub-action bar panel lifecycle
-        │   ├── SubBarState.swift             # Sub-bar visibility state model
+        │   ├── SubBarState.swift             # Hover sub-bar parent and anchor
         │   ├── ToastPanel.swift              # Non-key floating NSPanel behind the status toast
         │   ├── ToastPanelController.swift    # Owns the toast panel + auto-dismiss timer; single status surface
         │   └── ToastView.swift               # One-line SwiftUI toast `[spinner | icon] message`, PopupThemeModel-themed

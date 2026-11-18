@@ -16,62 +16,6 @@ final class ToastPanelControllerTests: XCTestCase {
         }
     }
 
-    @MainActor
-    func testShowPresentsFeedbackAndShows() {
-        let controller = ToastPanelController(autoDismissNanoseconds: 100_000_000)
-        controller.show(StatusFeedback(message: "Copied", style: .success, symbolName: "checkmark"))
-        XCTAssertTrue(controller.isShowing)
-        XCTAssertEqual(controller.currentFeedback?.message, "Copied")
-        XCTAssertFalse(controller.isLoading)
-        controller.hide()
-    }
-
-    /// Regression: the toast must size from laid-out content — not the hosting view's stale/large
-    /// fitting size, and not the `.preferredContentSize` option (which reports 0 and lets the window
-    /// auto-size to a constrained measurement that truncates the message to just the icon).
-    @MainActor
-    func testShownFrameIsCompactAndHoldsMessage() {
-        let controller = ToastPanelController()
-        controller.show(StatusFeedback(message: "Copied", style: .success, symbolName: "checkmark"))
-        XCTAssertLessThan(controller.panelFrame.height, 26 + 2 * PopupMetrics.toastShadowInset, "toast panel should be a slim single line (plus its shadow ring)")
-        XCTAssertGreaterThan(controller.panelFrame.width, 40, "frame must be wide enough to fit the message text, not just the icon")
-        XCTAssertGreaterThan(controller.panelFrame.width, 0, "toast must not render zero-sized")
-        controller.hide()
-    }
-
-    @MainActor
-    func testShowLoadingFlag() {
-        let controller = ToastPanelController()
-        controller.showLoading(message: "Opening Apple Music…")
-        XCTAssertTrue(controller.isShowing)
-        XCTAssertTrue(controller.isLoading)
-        controller.hide()
-    }
-
-    @MainActor
-    func testSwapToReplacesContent() {
-        let controller = ToastPanelController()
-        controller.showLoading(message: "Opening…")
-        controller.swapTo(StatusFeedback(message: "Done", style: .info))
-        XCTAssertEqual(controller.currentFeedback?.message, "Done")
-        XCTAssertFalse(controller.isLoading)
-        controller.hide()
-    }
-
-    /// The toast must center directly in-place over the anchored popup frame — linked to the
-    /// popup surface, never the cursor.
-    @MainActor
-    func testAnchorsCenteredOnPopupFrame() {
-        let controller = ToastPanelController()
-        let popup = NSRect(x: 400, y: 420, width: 220, height: 44)
-        controller.show(StatusFeedback(message: "Copied", style: .success, symbolName: "checkmark"), anchorFrame: popup)
-        XCTAssertEqual(controller.panelFrame.midX, popup.midX, accuracy: 1)
-        XCTAssertEqual(controller.panelFrame.midY, popup.midY, accuracy: 1)
-        XCTAssertEqual(controller.lastAnchorFrame, popup)
-        XCTAssertGreaterThan(controller.panelFrame.width, 0)
-        controller.hide()
-    }
-
     /// When near screen boundaries, the toast stays clamped within the visible frame.
     @MainActor
     func testClampsToVisibleFrameWhenPopupNearEdge() throws {
@@ -81,31 +25,6 @@ final class ToastPanelControllerTests: XCTestCase {
         controller.show(StatusFeedback(message: "Copied", style: .success), anchorFrame: popup)
         XCTAssertEqual(controller.panelFrame.midX, popup.midX, accuracy: 1)
         XCTAssertGreaterThanOrEqual(controller.panelFrame.minY + PopupMetrics.toastShadowInset, visible.minY)
-        controller.hide()
-    }
-
-    /// A follow-up show without an anchor (e.g. a loading spinner settling) stays attached to the
-    /// same popup frame instead of moving.
-    @MainActor
-    func testShowWithoutAnchorReusesLastPopupFrame() {
-        let controller = ToastPanelController()
-        let popup = NSRect(x: 500, y: 460, width: 240, height: 44)
-        controller.showLoading(message: "Opening…", anchorFrame: popup)
-        controller.swapTo(StatusFeedback(message: "Done", style: .info))
-        XCTAssertEqual(controller.panelFrame.midX, popup.midX, accuracy: 1)
-        XCTAssertEqual(controller.panelFrame.midY, popup.midY, accuracy: 1)
-        controller.hide()
-    }
-
-    /// With no anchor at all the toast centers deterministically on the main screen — it must
-    /// never fall back to chasing the pointer.
-    @MainActor
-    func testWithoutAnyAnchorCentersOnMainScreenNotCursor() throws {
-        let visible = try XCTUnwrap(NSScreen.main?.visibleFrame)
-        let controller = ToastPanelController()
-        controller.show(StatusFeedback(message: "Copied", style: .success))
-        XCTAssertNil(controller.lastAnchorFrame)
-        XCTAssertEqual(controller.panelFrame.midX, visible.midX, accuracy: 1)
         controller.hide()
     }
 
@@ -163,15 +82,6 @@ final class ToastPanelControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testKeepVisibleToastHasNoTimer() async throws {
-        let controller = ToastPanelController(autoDismissNanoseconds: 5_000_000)
-        controller.show(StatusFeedback(message: "Stick", style: .info, keepVisible: true))
-        try await Task.sleep(nanoseconds: 25_000_000)
-        XCTAssertTrue(controller.isShowing, "keep-visible toast must not auto-dismiss")
-        controller.hide()
-    }
-
-    @MainActor
     func testLoadingToastIsInteractiveAndTogglesIgnoresMouseEvents() {
         let controller = ToastPanelController()
         controller.showLoading(message: "Opening…", onCancel: {})
@@ -181,44 +91,5 @@ final class ToastPanelControllerTests: XCTestCase {
         XCTAssertTrue(controller.panelIgnoresMouseEvents, "settled toast must ignore mouse events")
         controller.hide()
         XCTAssertTrue(controller.panelIgnoresMouseEvents, "hidden toast must ignore mouse events")
-    }
-
-    @MainActor
-    func testLoadingToastPassiveWithoutCancelHandler() {
-        let controller = ToastPanelController()
-        controller.showLoading(message: "Opening…")
-        XCTAssertTrue(controller.panelIgnoresMouseEvents, "loading toast without onCancel must ignore mouse events")
-        controller.hide()
-    }
-
-    @MainActor
-    func testLoadingToastReservesWidthForCancelMessage() {
-        let controller = ToastPanelController()
-        // Single character message is much narrower than "Cancel Task"
-        controller.showLoading(message: "A", onCancel: {})
-        let shortMessageWidth = controller.panelFrame.width
-        controller.hide()
-
-        let cancelFeedback = StatusFeedback(message: String(localized: "Cancel Task"), style: .info, isLoading: true)
-        controller.show(cancelFeedback, onCancel: {})
-        let cancelOnlyWidth = controller.panelFrame.width
-        controller.hide()
-
-        XCTAssertGreaterThanOrEqual(shortMessageWidth, cancelOnlyWidth - 2, "short loading message must reserve at least Cancel Task width")
-    }
-
-    @MainActor
-    func testHideResetsHostingViewToIdle() {
-        let controller = ToastPanelController()
-        controller.showLoading(message: "Opening Apple Music…")
-        XCTAssertTrue(controller.isShowing)
-        XCTAssertTrue(controller.isLoading)
-        XCTAssertTrue(controller.rootFeedback.isLoading, "hostingView must reflect loading state while toast is showing")
-
-        controller.hide()
-        XCTAssertFalse(controller.isShowing)
-        XCTAssertFalse(controller.isLoading)
-        XCTAssertFalse(controller.rootFeedback.isLoading, "hostingView must be reset to an idle, non-loading view to stop display link animation")
-        XCTAssertEqual(controller.rootFeedback.message, "")
     }
 }

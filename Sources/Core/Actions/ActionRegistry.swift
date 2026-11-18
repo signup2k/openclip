@@ -47,14 +47,26 @@ public final class ActionRegistry: ObservableObject, Sendable {
             order.enumerated().map { ($1, $0) },
             uniquingKeysWith: { first, _ in first }
         )
+        // Older orders saved the AI Tools launcher in place of individual presets.
+        let legacyAIPosition: Int? = if registeredActions.contains(where: {
+            ActionIdentity.isAIPreset($0) && orderIndexMap[$0.id] != nil
+        }) {
+            nil
+        } else if let launcher = registeredActions.first(where: { $0.chrome.launchesAI }) {
+            orderIndexMap[launcher.id]
+        } else {
+            nil
+        }
 
         // Tier classification:
-        // Tier 0: Explicitly ordered by user in `action.order` (sorted by rank in orderIndexMap)
+        // Tier 0: Saved ranks in `action.order`, including presets at the legacy AI Tools position
         // Tier 1: Un-ordered built-in actions (sorted stably by insertion order)
         // Tier 2: Un-ordered extensions/other actions (sorted stably by insertion order)
         let ranked: [(action: any Action, tier: Int, rank: Int, stableOffset: Int)] = registeredActions.enumerated().map { offset, action in
             if let index = orderIndexMap[action.id] {
                 return (action, 0, index, offset)
+            } else if let legacyAIPosition, ActionIdentity.isAIPreset(action) {
+                return (action, 0, legacyAIPosition, offset)
             } else if ActionIdentity.isBuiltin(action) {
                 return (action, 1, 0, offset)
             } else {
@@ -145,7 +157,7 @@ public final class ActionRegistry: ObservableObject, Sendable {
         actions = newActions
         
         let newOrder = actions
-            .filter { !ActionIdentity.isAIPreset($0) && !($0 is CustomGroupAction) }
+            .filter { !($0 is CustomGroupAction) }
             .map { $0.id }
         settingsStore.set(.actionOrder, value: newOrder)
     }
@@ -187,13 +199,10 @@ public final class ActionRegistry: ObservableObject, Sendable {
     /// against the current selection/app? Settings-disable state is deliberately out of scope here
     /// (the bar applies it separately; the palette ignores it). Clipboard-fallback actions that
     /// require a live selection and formatting actions under a deny-formatting app policy drop.
-    /// AI presets are treated as performable (a palette selection routes to the AI card regardless
-    /// of the enable toggle; the bar excludes presets by policy, not by ability).
+    /// Search respects the global AI switch. The actions bar also checks each preset's own toggle.
     private func canPerform(_ action: any Action, in context: ActionContext) -> Bool {
-        // AI presets are always performable from the palette: a selection routes to the AI
-        // card regardless of the preset's enable toggle, so they stay visible.
         if ActionIdentity.isAIPreset(action) {
-            return true
+            return settingsStore.get(.isAIEnabled)
         }
         // Clipboard fallback is not a live selection: Copy/Cut (and any future action that
         // reads or mutates the real selection) must not act on text that was never selected.
@@ -208,14 +217,13 @@ public final class ActionRegistry: ObservableObject, Sendable {
         let disabledPackages = settingsStore.get(.disabledPackages)
 
         func passes(_ action: any Action) -> Bool {
-            // AI preset actions are never bar rows: the reorderable `builtin.aiTools` action
-            // (chrome.launchesAI) is the popup's AI entry, so presets must not flood the
-            // paginated bar even when enabled.
-            if ActionIdentity.isAIPreset(action) {
+            if action.chrome.launchesAI || action is GatedExtensionAction {
                 return false
             }
-            if action is GatedExtensionAction {
-                return false
+            // Preferences stores preset visibility in the preset itself. An old generic
+            // disabled-action ID must not override that toggle.
+            if ActionIdentity.isAIPreset(action) {
+                return action.isEnabled(for: context)
             }
             guard canPerform(action, in: context) else { return false }
             if disabledIDs.contains(action.id) {

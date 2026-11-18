@@ -20,9 +20,18 @@ public final class BrowserRedirectProvider: AIProvider {
     }
 
     public func process(prompt: String, text: String) async throws -> String {
+        let url = try requestURL(prompt: prompt, text: text)
+        let opened = NSWorkspace.shared.open(url)
+        guard opened else { throw AIError.invalidURL(url.absoluteString) }
+        return "Opened in browser"
+    }
+
+    /// Build the query separately from opening the browser so prompt formatting is testable.
+    func requestURL(prompt: String, text: String) throws -> URL {
         let input = try AIRequestSupport.requireNonEmptyText(text)
         let instruction = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fullQuery = instruction.isEmpty ? input : "\(instruction): \(input)"
+        let separator = instruction.hasSuffix(":") || instruction.hasSuffix("：") ? "\n" : ": "
+        let fullQuery = instruction.isEmpty ? input : "\(instruction)\(separator)\(input)"
 
         guard let encodedQuery = fullQuery.addingPercentEncoding(withAllowedCharacters: AIRequestSupport.queryValueAllowed) else {
             throw AIError.invalidURL(fullQuery)
@@ -44,11 +53,7 @@ public final class BrowserRedirectProvider: AIProvider {
             throw AIError.invalidURL(urlString)
         }
 
-        let opened = NSWorkspace.shared.open(url)
-        guard opened else {
-            throw AIError.invalidURL(url.absoluteString)
-        }
-        return "Opened in browser"
+        return url
     }
 
     public func processStream(prompt: String, text: String) -> AsyncThrowingStream<String, Error> {

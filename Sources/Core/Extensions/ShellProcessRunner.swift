@@ -466,10 +466,13 @@ public enum ShellProcessRunner {
                 errReader.start()
 
                 var watchdog: DispatchSourceTimer?
+                var pipesDrained = false
                 defer {
                     watchdog?.cancel()
-                    outReader.finish()
-                    errReader.finish()
+                    if !pipesDrained {
+                        outReader.finish()
+                        errReader.finish()
+                    }
                 }
 
                 try process.run()
@@ -516,6 +519,10 @@ public enum ShellProcessRunner {
                                   userInfo: [NSLocalizedDescriptionKey: "Script timed out after \(Int(budget)) seconds"])
                 }
 
+                outReader.finish()
+                errReader.finish()
+                pipesDrained = true
+                if processBox.isCancelled { throw CancellationError() }
                 let outData = outReader.data
                 let errData = errReader.data
 

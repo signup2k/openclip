@@ -106,9 +106,6 @@ public enum Constants {
     /// Concurrent callers; permits are released when their deadline settles.
     public static let pasteProbeMaxConcurrent: Int = 4
 
-    /// Hard deadline (seconds) for the browser-script retrieval bridge to return a selection.
-    public static let browserScriptTimeout: TimeInterval = 1.0
-
     /// Hard deadline (seconds) for reading the clipboard after issuing a Cmd+C copy.
     public static let pasteboardCopyTimeout: TimeInterval = 0.25
 

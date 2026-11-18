@@ -17,12 +17,21 @@ import Core
 
 @MainActor
 struct PopupThemeSelector: View {
+    private let settingsStore: SettingsStore
+    @State private var popupLayout: String
     @AppStorage(SettingKey.popupTheme.name) private var theme: String = SettingKey.popupTheme.defaultValue
     @AppStorage(SettingKey.popupThemeColor.name) private var themeColor: String = SettingKey.popupThemeColor.defaultValue
     @AppStorage(SettingKey.popupScale.name) private var popupScale: Int = SettingKey.popupScale.defaultValue
     @AppStorage(SettingKey.popupBarWidth.name) private var barWidthLevel: Int = SettingKey.popupBarWidth.defaultValue
     @AppStorage(SettingKey.popupAlignment.name) private var popupAlignment: String = SettingKey.popupAlignment.defaultValue
     @AppStorage(SettingKey.popupVerticalPosition.name) private var popupVerticalPosition: String = SettingKey.popupVerticalPosition.defaultValue
+
+    init(settingsStore: SettingsStore = DefaultSettingsStore.shared) {
+        self.settingsStore = settingsStore
+        self._popupLayout = State(initialValue: settingsStore.get(.popupLayout))
+    }
+
+    private var isRadial: Bool { PopupLayoutStyle.resolve(popupLayout) == .radial }
 
     private struct AppearanceOption: Identifiable {
         let label: String
@@ -47,6 +56,13 @@ struct PopupThemeSelector: View {
         [
             AppearanceOption(label: "Classic", value: "classic", icon: ""),
             AppearanceOption(label: "Glass", value: "glass", icon: "")
+        ]
+    }
+
+    private var layoutOptions: [AppearanceOption] {
+        [
+            AppearanceOption(label: "Horizontal", value: "horizontal", icon: ""),
+            AppearanceOption(label: "Radial", value: "radial", icon: "")
         ]
     }
 
@@ -83,6 +99,7 @@ struct PopupThemeSelector: View {
     }
 
     private var isAllDefault: Bool {
+        popupLayout == SettingKey.popupLayout.defaultValue &&
         theme == SettingKey.popupTheme.defaultValue &&
         themeColor == SettingKey.popupThemeColor.defaultValue &&
         popupScale == SettingKey.popupScale.defaultValue &&
@@ -92,6 +109,7 @@ struct PopupThemeSelector: View {
     }
 
     private func resetToDefaults() {
+        popupLayout = SettingKey.popupLayout.defaultValue
         theme = SettingKey.popupTheme.defaultValue
         themeColor = SettingKey.popupThemeColor.defaultValue
         popupScale = SettingKey.popupScale.defaultValue
@@ -103,12 +121,20 @@ struct PopupThemeSelector: View {
     var body: some View {
         Form {
             Section {
+                layoutRow
+                if isRadial {
+                    Text("Radial menus open around the pointer. Move into a sector, then click.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
                 themeRow
                 modeRow
-                alignmentRow
-                verticalPositionRow
+                if !isRadial {
+                    alignmentRow
+                    verticalPositionRow
+                }
                 sizeRow
-                barWidthRow
+                if !isRadial { barWidthRow }
             } footer: {
                 HStack {
                     Spacer()
@@ -126,6 +152,29 @@ struct PopupThemeSelector: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
+        .onChange(of: popupLayout) { _, value in
+            if settingsStore.get(.popupLayout) != value {
+                settingsStore.set(.popupLayout, value: value)
+            }
+        }
+        .onReceive(settingsStore.publisher(for: .popupLayout).receive(on: DispatchQueue.main)) { value in
+            popupLayout = value
+        }
+    }
+
+    private var layoutRow: some View {
+        HStack(spacing: 12) {
+            rowTitle(icon: "circle.grid.2x2", title: "Menu Layout")
+            Spacer()
+            labelSegments(
+                options: layoutOptions,
+                segmentWidth: 72,
+                isSelected: { PopupLayoutStyle.resolve(popupLayout).rawValue == $0.value },
+                select: { popupLayout = $0 }
+            )
+        }
+        .frame(minHeight: 24)
+        .padding(.vertical, 3)
     }
 
     private var themeRow: some View {

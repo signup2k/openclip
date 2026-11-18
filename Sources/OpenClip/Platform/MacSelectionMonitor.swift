@@ -6,7 +6,7 @@ import AppKit
 import Core
 
 @MainActor
-internal final class MacSelectionMonitor: SelectionMonitoring {
+internal final class MacSelectionMonitor {
     /// Selection context + the paste-availability probe result for the source app (`nil` when the
     /// app is excluded or the probe never ran).
     internal var onSelection: ((SelectionContext, Bool?) -> Void)?
@@ -366,17 +366,20 @@ internal final class MacSelectionMonitor: SelectionMonitoring {
                 let dy = cursor.y - downPoint.y
                 isDragOrMultiClick = (dx * dx + dy * dy) > 9.0 // > 3px movement
             }
-            guard isDragOrMultiClick else { return }
             
             let appIdentity = AppIdentity(app)
-            let probeTask = self.preparePasteProbe?(app, policy)
+            var probeTask = isDragOrMultiClick ? self.preparePasteProbe?(app, policy) : nil
             // Direct AX check executed IMMEDIATELY (0ms delay) for instant smooth opening
             let result = await retriever.retrieve(
                 for: appIdentity,
                 policy: policy,
-                cursor: currentCursorProvider()
+                cursor: currentCursorProvider(),
+                nativeSelectionOnly: !isDragOrMultiClick
             )
             if Task.isCancelled { return }
+            if !isDragOrMultiClick, result != nil {
+                probeTask = self.preparePasteProbe?(app, policy)
+            }
             await self.deliverSelection(
                 result: result,
                 appIdentity: appIdentity,

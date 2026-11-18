@@ -13,10 +13,9 @@ import Core
 
 public struct SelectionRetrievalCoordinator: Sendable {
     public typealias TargetProvider = @Sendable () -> AXElementInspector.Target
-    public typealias BrowserReader = @Sendable (String) async -> BrowserScriptStrategy.BrowserResult?
     public typealias CopyTrigger = PasteboardCopyEngine.CopyTrigger
     public typealias CopyCapture = @Sendable (CopyTrigger) async -> TextResult?
-    public typealias MenuPress = @Sendable (AXUIElement?) -> Void
+    public typealias MenuPress = @Sendable (AXUIElement?, Date, @Sendable () -> Bool) -> Void
 
     /// Dedicated concurrent queue for blocking AX work (the inspect snapshot and the Edit ▸ Copy
     /// AXPress). Concurrent so a blocked accessibility call cannot prevent later inspectWithWatchdog
@@ -41,7 +40,6 @@ public struct SelectionRetrievalCoordinator: Sendable {
 
     private let inputRevision: @Sendable () -> [UInt32]
     private let inspect: TargetProvider
-    private let browserRead: BrowserReader
     private let copyCapture: CopyCapture
     private let menuPress: MenuPress
 
@@ -51,15 +49,11 @@ public struct SelectionRetrievalCoordinator: Sendable {
     public init(
         inputRevision: @escaping @Sendable () -> [UInt32] = PasteboardCopyEngine.hardwareInputRevision,
         inspect: @escaping TargetProvider = { AXElementInspector.inspect() },
-        browserRead: @escaping BrowserReader = { bundleIdentifier in
-            await BrowserScriptStrategy.read(bundleIdentifier: bundleIdentifier)
-        },
         copyCapture: @escaping CopyCapture = Self.defaultCopyCapture,
         menuPress: @escaping MenuPress = Self.pressEditCopyMenu
     ) {
         self.inputRevision = inputRevision
         self.inspect = inspect
-        self.browserRead = browserRead
         self.copyCapture = copyCapture
         self.menuPress = menuPress
     }
@@ -81,7 +75,8 @@ public struct SelectionRetrievalCoordinator: Sendable {
         for app: AppIdentity,
         policy: AppPolicyContext,
         cursor: CursorClass,
-        isSelectAll: Bool = false
+        isSelectAll: Bool = false,
+        nativeSelectionOnly: Bool = false
     ) async -> TextResult? {
         guard !Task.isCancelled else { return nil }
         let input = inputRevision()
@@ -103,9 +98,20 @@ public struct SelectionRetrievalCoordinator: Sendable {
             }
         }
 
+        let nativeTextControl = AXElementInspector.isNativeTextControl(
+            role: target.role, containedInRoles: target.containedInRoles
+        )
+        // Single clicks may auto-select an address/search field. Read only explicit AX selection;
+        // never probe a webpage or simulate Copy for an ordinary click.
+        if nativeSelectionOnly {
+            guard nativeTextControl, !Task.isCancelled, inputRevision() == input else { return nil }
+            return Self.nonBlank(AXTextControlStrategy.read(from: target))
+        }
+
         // Gate 2: only read when the cursor class suggests a text context. `.unknown` is never a
         // reason to block (the classifier may simply not recognize the cursor image).
-        if cursor != .unknown, !policy.gate.allowedCursors.contains(cursor) {
+        if !(nativeTextControl && Self.isKnownBrowser(app.bundleIdentifier)),
+           cursor != .unknown, !policy.gate.allowedCursors.contains(cursor) {
             Log.selection.debug("coordinator: skipping \(app.bundleIdentifier ?? "unknown", privacy: .public); cursor \(cursor.rawValue, privacy: .public) not allowed")
             return nil
         }
@@ -121,7 +127,7 @@ public struct SelectionRetrievalCoordinator: Sendable {
 
         Log.selection.debug("coordinator: gate passed for \(app.bundleIdentifier ?? "unknown", privacy: .public); retrieving via \(policy.retrievalMode.rawValue, privacy: .public)")
 
-        return Self.nonBlank(await read(for: app, target: target, policy: policy, input: input))
+        return await read(for: app, target: target, policy: policy, input: input)
     }
 
     /// Resolves an ordered cascade of strategies from the inspected target and the app, then returns
@@ -171,7 +177,8 @@ public struct SelectionRetrievalCoordinator: Sendable {
     ) async -> TextResult {
         guard result.html == nil && result.rtf == nil else { return result }
         guard strategy != .keyboardCopy && strategy != .menuCopy else { return result }
-        let bundleIsBrowser = Self.isScriptableBrowser(app.bundleIdentifier)
+        guard !AXElementInspector.isNativeTextControl(role: target.role, containedInRoles: target.containedInRoles) else { return result }
+        let bundleIsBrowser = Self.isKnownBrowser(app.bundleIdentifier)
         guard bundleIsBrowser || target.webArea != nil || target.role == "AXWebArea" else { return result }
         Log.selection.debug("coordinator: text-only web selection; enriching via pasteboard rich capture")
         guard let captured = Self.nonBlank(await run(.keyboardCopy, app: app, target: target)),
@@ -187,9 +194,7 @@ public struct SelectionRetrievalCoordinator: Sendable {
         )
     }
 
-    /// Bundle-id PATTERNS of scriptable browsers, matched with `DefaultAppRules` wildcard
-    /// semantics. A raw Set lookup here silently missed every pattern entry (e.g.
-    /// `com.google.Chrome.*`), so Chromium-family apps never reached the AppleScript read.
+    /// Browser bundle IDs and wildcard patterns used for native editor and web selection handling.
     private static let browserBundlePatterns: [String] = Array(Set(
         DefaultAppRules.safariGroup
             + DefaultAppRules.chromiumGroup
@@ -197,7 +202,7 @@ public struct SelectionRetrievalCoordinator: Sendable {
             + DefaultAppRules.arcGroup
     ))
 
-    private static func isScriptableBrowser(_ bundleIdentifier: String?) -> Bool {
+    private static func isKnownBrowser(_ bundleIdentifier: String?) -> Bool {
         guard let bundleIdentifier else { return false }
         return DefaultAppRules.matchesAny(browserBundlePatterns, bundleID: bundleIdentifier)
     }
@@ -214,6 +219,13 @@ public struct SelectionRetrievalCoordinator: Sendable {
         target: AXElementInspector.Target,
         bundleIdentifier: String?
     ) -> [RetrievalStrategy] {
+        // Browser chrome is a native editor, not the page behind it. An empty AX selection
+        // here is authoritative; copying as a fallback would interfere with the user's clipboard.
+        if Self.isKnownBrowser(bundleIdentifier),
+           AXElementInspector.isNativeTextControl(role: target.role, containedInRoles: target.containedInRoles),
+           policy.retrievalMode == .axWebArea || policy.retrievalMode == .browserScript || policy.retrievalMode == .axTextControl {
+            return [.axTextControl]
+        }
         switch policy.retrievalMode {
         case .axTextControl:
             // Embedded webview (e.g. Apple Mail email body, Help viewer, Xcode documentation) -> web cascade
@@ -288,37 +300,34 @@ public struct SelectionRetrievalCoordinator: Sendable {
             }
             return nil
 
-        case .browserScript:
-            return nil
-
         case .menuCopy, .keyboardCopy:
             // The copy engine is the source of truth for whether a selection existed: it returns nil
             // when the clipboard changeCount never advances or the copied string is empty, so a copy
             // on an empty selection fails cleanly instead of being pre-gated by a (possibly stale)
             // AX selection read.
             let trigger: CopyTrigger
-            switch strategy {
-            case .menuCopy:
+            if strategy == .menuCopy {
                 let press = menuPress
                 let inputRevision = self.inputRevision
-                trigger = {
-                    guard !Task.isCancelled else { return }
+                trigger = { deadline, isActive in
+                    guard isActive() else { return }
                     let input = inputRevision()
                     Task.detached {
-                        await Self.pressCopyMenuWithWatchdog(app: target.focusedApp, press: { element in
-                            guard inputRevision() == input else { return }
-                            press(element)
-                        })
+                        await Self.pressCopyMenuWithWatchdog {
+                            guard isActive() else { return }
+                            let axDeadline = min(deadline, Date().addingTimeInterval(Constants.axReadTimeout))
+                            press(target.focusedApp, axDeadline) {
+                                inputRevision() == input && isActive()
+                            }
+                        }
                     }
                 }
-            case .keyboardCopy:
-                trigger = {
-                    guard !Task.isCancelled,
+            } else {
+                trigger = { _, isActive in
+                    guard isActive(),
                           NSWorkspace.shared.frontmostApplication?.bundleIdentifier == app.bundleIdentifier else { return }
                     SessionEventTapPoster().postKey(keyCode: Constants.copyVirtualKey, flags: .maskCommand)
                 }
-            default:
-                return nil
             }
             guard let captured = await copyCapture(trigger) else { return nil }
             return TextResult(text: captured.text, bounds: target.bounds, html: captured.html, rtf: captured.rtf)
@@ -329,19 +338,8 @@ public struct SelectionRetrievalCoordinator: Sendable {
     private enum RetrievalStrategy: String, Equatable, Sendable {
         case axTextControl = "ax-text-control"
         case axWebArea = "ax-web-area"
-        case browserScript = "browser-script"
         case menuCopy = "menu-copy"
         case keyboardCopy = "keyboard-copy"
-
-        init(mode: SelectionRetrievalMode) {
-            switch mode {
-            case .axTextControl: self = .axTextControl
-            case .axWebArea: self = .axWebArea
-            case .browserScript: self = .browserScript
-            case .menuCopy: self = .menuCopy
-            case .keyboardCopy: self = .keyboardCopy
-            }
-        }
     }
 
     /// Runs the blocking AX snapshot off the cooperative pool, racing it against
@@ -362,15 +360,13 @@ public struct SelectionRetrievalCoordinator: Sendable {
         }
         return await withCheckedContinuation { (continuation: CheckedContinuation<Value?, Never>) in
             let resume = OnceResume<Value?>()
-            let timeout = TaskBox()
-
-            timeout.set(Task {
+            let timeout = Task {
                 try? await Task.sleep(nanoseconds: UInt64(Constants.axReadTimeout * 1_000_000_000))
                 if resume.resume(continuation, with: nil) {
                     Task.detached { await Self.inspectGate.release() }
                     Log.selection.debug("coordinator: AX inspect exceeded \(Constants.axReadTimeout)s deadline; returning nil")
                 }
-            })
+            }
 
             Self.axInspectQueue.async {
                 let target = operation()
@@ -406,31 +402,28 @@ public struct SelectionRetrievalCoordinator: Sendable {
     /// AXPress the Edit ▸ Copy menu item of `app`'s menu bar via the robust menu navigator.
     /// Best-effort: a failed lookup performs no press and the pasteboard capture times out.
     @usableFromInline
-    static func pressEditCopyMenu(app: AXUIElement?) {
-        AXMenuNavigator.press(.copy, in: app, deadline: Date().addingTimeInterval(Constants.axReadTimeout))
+    static func pressEditCopyMenu(app: AXUIElement?, deadline: Date, canPress: @Sendable () -> Bool) {
+        AXMenuNavigator.press(.copy, in: app, deadline: deadline, canPress: canPress)
     }
 
     /// Starts the Edit ▸ Copy press on `axInspectQueue`.
     /// The first of the press completing or `axReadTimeout` expiring releases `inspectGate`.
     private static func pressCopyMenuWithWatchdog(
-        app: AXUIElement?,
-        press: @escaping MenuPress
+        _ press: @escaping @Sendable () -> Void
     ) async {
         guard await inspectGate.tryAcquire(limit: Constants.axMaxConcurrentInspects) else { return }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let resume = OnceResume<Void>()
-            let timeout = TaskBox()
-
-            timeout.set(Task {
+            let timeout = Task {
                 try? await Task.sleep(nanoseconds: UInt64(Constants.axReadTimeout * 1_000_000_000))
                 if resume.resume(continuation, with: ()) {
                     Task.detached { await inspectGate.release() }
                     Log.selection.debug("coordinator: Edit ▸ Copy press exceeded \(Constants.axReadTimeout)s deadline; releasing inspect gate")
                 }
-            })
+            }
 
             axInspectQueue.async {
-                press(app)
+                press()
                 if resume.resume(continuation, with: ()) {
                     timeout.cancel()
                     Task.detached { await inspectGate.release() }

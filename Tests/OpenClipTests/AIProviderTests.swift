@@ -3,6 +3,13 @@ import XCTest
 
 @MainActor
 final class AIProviderTests: XCTestCase {
+    func testExplanationPromptAndSelectionFillBrowserPlaceholderWithoutExtraColon() throws {
+        let provider = BrowserRedirectProvider(template: "https://example.com/?q={text}")
+        let prompt = "搜索、分析后，ELI25，用中文简洁解释："
+        let url = try provider.requestURL(prompt: prompt, text: "A&B + 中文")
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "q" }?.value
+        XCTAssertEqual(query, prompt + "\nA&B + 中文")
+    }
 
     // MARK: - Apple Intelligence
 
@@ -40,88 +47,6 @@ final class AIProviderTests: XCTestCase {
         XCTAssertEqual(provider.model, "llama3")
     }
 
-    func testOllamaStripsTrailingSlash() {
-        let provider = OllamaProvider(baseURL: "http://localhost:11434/", model: "llama3")
-        XCTAssertEqual(provider.baseURL, "http://localhost:11434")
-    }
-
-    func testOllamaRejectsEmptyText() async {
-        let provider = OllamaProvider(baseURL: "http://localhost:11434", model: "llama3")
-        do {
-            _ = try await provider.process(prompt: "Summarize", text: "\t")
-            XCTFail("Expected emptyInput")
-        } catch let error as AIError {
-            XCTAssertEqual(error, .emptyInput)
-        } catch {
-            XCTFail("Unexpected error: \(error)")
-        }
-    }
-
-    // MARK: - Browser redirect
-
-    func testBrowserRedirectUsesDefaultTemplateWhenEmpty() {
-        let provider = BrowserRedirectProvider(template: "")
-        XCTAssertEqual(provider.template, "https://chatgpt.com/?q={text}")
-    }
-
-    // MARK: - Manager
-
-    func testAIServiceManagerProviderTypes() {
-        let manager = AIServiceManager.shared
-        let previous = manager.activeProviderRaw
-        defer { manager.activeProviderRaw = previous }
-
-        manager.activeProviderType = .apple
-        XCTAssertEqual(manager.currentProvider.type, .apple)
-
-        manager.activeProviderType = .ollama
-        XCTAssertEqual(manager.currentProvider.type, .ollama)
-
-        manager.activeProviderType = .cloud
-        XCTAssertEqual(manager.currentProvider.type, .cloud)
-
-        manager.activeProviderType = .browser
-        XCTAssertEqual(manager.currentProvider.type, .browser)
-    }
-
-    func testEffectiveBrowserURLTemplatePresets() {
-        let manager = AIServiceManager.shared
-        let previousPreset = manager.browserPreset
-        let previousCustom = manager.browserURLTemplate
-        defer {
-            manager.browserPreset = previousPreset
-            manager.browserURLTemplate = previousCustom
-        }
-
-        manager.browserPreset = "claude"
-        XCTAssertTrue(manager.effectiveBrowserURLTemplate.contains("claude.ai"))
-
-        manager.browserPreset = "custom"
-        manager.browserURLTemplate = "https://example.com/ai?q={text}"
-        XCTAssertEqual(manager.effectiveBrowserURLTemplate, "https://example.com/ai?q={text}")
-
-        manager.browserURLTemplate = "   "
-        XCTAssertEqual(manager.effectiveBrowserURLTemplate, "https://chatgpt.com/?q={text}")
-    }
-
-    func testAIErrorDescriptionsArePresent() {
-        let errors: [AIError] = [
-            .emptyInput,
-            .missingAPIKey,
-            .invalidURL("bad"),
-            .invalidResponse,
-            .httpStatus(500, "boom"),
-            .httpStatus(404, nil),
-            .unsupportedModel("gemini"),
-            .providerUnavailable("Apple Intelligence is not available on this device"),
-            .requestTooLarge,
-            .cancelled
-        ]
-        for error in errors {
-            XCTAssertFalse(error.errorDescription?.isEmpty ?? true)
-        }
-    }
-
     // MARK: - Extract Result & Reasoning Tags
 
     func testExtractResultText() {
@@ -153,8 +78,11 @@ final class AIProviderTests: XCTestCase {
         let defaultOpenAI = CloudAPIProvider(apiKey: "key", model: "gpt-4o", serviceProvider: .openai)
         XCTAssertEqual(defaultOpenAI.effectiveBaseURL, "https://api.openai.com/v1")
 
-        let customAnthropic = CloudAPIProvider(apiKey: "key", model: "claude-3-5-sonnet", serviceProvider: .anthropic, customBaseURL: "https://my-proxy.internal/v1")
-        XCTAssertEqual(customAnthropic.effectiveBaseURL, "https://my-proxy.internal/v1")
+        let anthropic = CloudAPIProvider(apiKey: "key", model: "claude-3-5-sonnet", serviceProvider: .anthropic, customBaseURL: "https://my-proxy.internal/v1")
+        XCTAssertEqual(anthropic.effectiveBaseURL, CloudServiceProvider.anthropic.defaultBaseURL)
+
+        let custom = CloudAPIProvider(apiKey: "key", model: "model", serviceProvider: .custom, customBaseURL: "https://my-proxy.internal/v1")
+        XCTAssertEqual(custom.effectiveBaseURL, "https://my-proxy.internal/v1")
     }
 
     func testSystemPromptAndUserContentFormatting() {

@@ -3,8 +3,7 @@
 //
 // Keeps AIServiceManager's AI presets registered in the ActionCoordinator as individual
 // `AIAction`s, so every preset shows up as a searchable entry in the action-search palette and
-// as its own row in Preferences → Actions (while staying out of the popup bar — the reorderable
-// `builtin.aiTools` action is the bar's AI entry point). Also registers that AI Tools launcher.
+// as its own row in the popup and Preferences → Actions. Also registers the AI Tools settings row.
 // Reconciles the registered set whenever the preset list
 // changes; the title snapshot on `AIAction` is refreshed by re-registering on any content change.
 import Foundation
@@ -33,9 +32,7 @@ public final class AIActionSync {
         coordinator.register(action: AIToolsAction())
     }
 
-    /// Reconciles the registered AI actions against the current preset list. Cheap when nothing
-    /// changed (single fingerprint compare), so it is safe to call from any display surface too.
-    public func sync() {
+    private func sync() {
         let presets = AIServiceManager.shared.presets
         let fingerprint = presets.map { "\($0.id)|\($0.title)|\($0.prompt)|\($0.isEnabled)" }
         guard fingerprint != lastFingerprint else { return }

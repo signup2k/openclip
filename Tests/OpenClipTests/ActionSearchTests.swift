@@ -39,17 +39,6 @@ final class ActionSearchTests: XCTestCase {
         XCTAssertEqual(result.map(\.id), ["a"])
     }
 
-    func testKeywordsMatchRanksBelowTitleMatches() {
-        let items = [item("a", "Look Up", "wikipedia"), item("b", "Define", "wikipedia")]
-        let result = ActionSearch.search("wikipedia", in: items)
-        XCTAssertEqual(result.map(\.id), ["a", "b"])
-    }
-
-    func testNonMatchingQueryReturnsEmpty() {
-        let items = [item("a", "Copy"), item("b", "Paste")]
-        XCTAssertTrue(ActionSearch.search("zzz", in: items).isEmpty)
-    }
-
     func testFuzzySubsequenceRanksBelowTitleContainsAndAboveKeyword() {
         // "sear": prefix on a, contains on b, fuzzy subsequence on c (s→e→a→r, not contiguous)
         let items = [
@@ -59,16 +48,6 @@ final class ActionSearchTests: XCTestCase {
         ]
         let result = ActionSearch.search("sear", in: items)
         XCTAssertEqual(result.map(\.id), ["a", "b", "c"])
-    }
-
-    func testFuzzySubsequenceBeatsKeywordContains() {
-        // "exa": fuzzy subsequence on b (e-x…a in "Extra Audit"), keyword contains on a
-        let items = [
-            item("a", "Copy", "example"),
-            item("b", "Extra Audit")
-        ]
-        let result = ActionSearch.search("exa", in: items)
-        XCTAssertEqual(result.map(\.id), ["b", "a"])
     }
 
     func testFuzzyTightMatchRanksAboveLooseMatch() {
@@ -93,16 +72,6 @@ final class ActionSearchTests: XCTestCase {
         XCTAssertEqual(result.map(\.id), ["b", "a"])
     }
 
-    func testBarOrderIsFinalTieBreakWhenRecencyTies() {
-        // Same tier, same recency → input (bar) order wins.
-        let items = [
-            item("a", "Look Up", "", 3),
-            item("b", "Look Out", "", 3)
-        ]
-        let result = ActionSearch.search("look", in: items)
-        XCTAssertEqual(result.map(\.id), ["a", "b"])
-    }
-
     func testNonASCIIAndUnicodeScalarMatching() {
         let items = [
             item("a", "Übersetzen"),
@@ -114,5 +83,13 @@ final class ActionSearchTests: XCTestCase {
 
         let cjkResult = ActionSearch.search("翻訳", in: items)
         XCTAssertEqual(cjkResult.map(\.id), ["c"])
+    }
+
+    @MainActor
+    func testRecencyPersistsAcrossInstances() {
+        let settings = MemorySettingsStore()
+        ActionUsageStore(settingsStore: settings).record("builtin.search")
+        let reloaded = ActionUsageStore(settingsStore: settings)
+        XCTAssertEqual(reloaded.recency["builtin.search"], 1)
     }
 }

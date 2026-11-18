@@ -19,9 +19,10 @@ areas; stale debt notes are worse than none.
 - **Secrets live in SecretStore, not UserDefaults or macOS Keychain.** Sensitive credentials
   (the cloud AI API key and action secret options) use `SecretStore` (`~/.openclip/secrets.json`
   with 0600 POSIX permissions), replacing macOS Keychain to avoid code-signing ACL prompts.
-  `AIServiceManager.cloudAPIKey` is `@Published`, backed by `SecretStore` (account `aiCloudAPIKey`);
-  do not convert it back to `@AppStorage`. A one-time migration reads the old `UserDefaults`
-  `"aiCloudAPIKey"` key, then deletes it.
+  `AIServiceManager` looks up cloud keys by service and HTTP origin (scheme, host, and port).
+  Model discovery and inference share that scope and follow same-origin redirects only. Migration
+  binds the old SecretStore or UserDefaults key to the configured cloud service and origin.
+  Preferences reports a failed save or deletion and keeps the persisted key displayed.
 - **`isAppEnabled` is consolidated** onto `SettingKey.isAppEnabled` — status bar, hotkey gate, and
   the Preferences toggle all read/write through `DefaultSettingsStore`. Builtin store-backed actions
   (`CalculateAction`, `CalendarAction`, `SearchAction`) accept an injected `SettingsStore` via
@@ -76,7 +77,7 @@ areas; stale debt notes are worse than none.
   (`builtin.copy`, `com.user.ext.action`). `ActionRegistry` dynamically materializes `CustomGroupAction`
   (`Sources/Core/Actions/CustomGroupAction.swift`, conforming to `Action` and `SubActionProviding`)
   group rows, injecting them contiguously before their member actions in `actions`, while `SettingKey.actionOrder`
-  strictly stores real, canonical IDs (excluding synthetic group headers and AI presets). `ActionCoordinator`
+  strictly stores real, canonical IDs (including flat AI presets, excluding synthetic group headers). `ActionCoordinator`
   manages the full group lifecycle (`createGroup`, `updateGroup`, `ungroup`, `removeFromGroup`, `loadGroupDefs`,
   `pruneOrphans`), automatically enforcing the strict $\ge 2$ member invariant: when members are uninstalled
   or removed, any group dropping below 2 members is immediately dissolved. Availability resolution in
@@ -112,6 +113,32 @@ areas; stale debt notes are worse than none.
 
 ## Action-Search Palette & Popup Growth
 
+- **A radial menu is available alongside the horizontal bar.** Appearance → Menu Layout stores
+  `SettingKey.popupLayout` through `SettingsStore` (default `horizontal`; unknown values fall back).
+  `PopupRadialLayout` caps pages at eight annular targets and shares geometry with the sector click
+  shapes; actions and word completions both use the disk. A right-click must start and end on the
+  same sector. A group hover sub-bar uses the sector for horizontal alignment and both disk edges
+  for vertical placement. Placement centers on the release cursor
+  and clamps both axes to the screen. The normal visible diameter is 144pt (previously 200pt),
+  with symbol-only sectors and titles in the central hub. The controller fixes the footprint
+  before the first layout and captures the target display, so reuse and late layout passes do not
+  alter edge placement. Exact screen containment precedes the 2pt boundary tolerance.
+  Transparent corners use the existing shadow click-through
+  path. `PopupPanel.radialActionFrame` restores the original disk frame after search/content
+  transitions, including hosting-view auto-resizes. Search, result cards, and group hover sub-bars
+  keep their existing layouts; horizontal alignment/vertical position/width settings apply only
+  to the bar. The maximum radial scale remains below the shared 300pt panel height cap.
+- **AI presets are standalone rows in Preferences and both popup layouts.** `AIActionSync` registers
+  them before the selection monitor and hotkeys can open the popup. Popup visibility uses the global
+  AI switch and each preset's own toggle. Search includes individually disabled presets only while
+  AI Tools is on. The controller starts AI presets before dismissing a hotkey-opened palette. `action.order` saves
+  preset positions. Older orders without preset positions use the saved AI Tools position when one
+  exists. Both click paths use the AI loading and streaming flow. The AI Tools row opens provider
+  settings in Preferences, and each preset's gear opens `EditAIPresetSheet`. Group rows open scoped
+  search on click and a transient sub-bar on hover. The Explain default
+  requests search/analysis and a concise Chinese ELI25 explanation. On startup, saved Explain
+  prompts that match a previous shipped default in any supported locale are updated in place.
+  Customized prompts and toggle states are preserved.
 - **Content-driven panel growth has no controller callback.** The `NSHostingView` auto-resizes the
   panel window top-anchored when its SwiftUI content grows (e.g. entering search mode);
   `onPreferenceChange`/`onContentSizeChange` never fires for this and `sizingOptions` has no effect.
@@ -142,7 +169,8 @@ areas; stale debt notes are worse than none.
   perform paths as `actionTitle`); AI streaming deliveries pass no icon and keep the sparkles glyph. `StatusBadgeModel` and the old `.info`/`.result`/`.menu` emphasis
   model are gone, and the inline status banner is gone too: every `StatusFeedback` renders as a
   floating toast (`ToastPanelController`) with no queue — a status shows over the card — and
-  `showsLoading` actions (manifest `"loading"`) use the early-close spinner toast.
+  `showsLoading` actions (manifest `"loading"`) use the early-close spinner toast. Each run
+  can settle its own spinner. Error cards omit the Copy and Paste buttons and ignore their shortcuts.
 - **`MathEvaluator` replaced crash-prone `NSExpression`.** `CalculateAction` used to run
   `NSExpression(format:)`, which throws an **uncaught Objective-C exception** on malformed selection
   text like `+` or `1+` (crash). The pure-Swift `MathEvaluator` (`Sources/Core/Actions/MathEvaluator.swift`)
@@ -176,8 +204,9 @@ areas; stale debt notes are worse than none.
   in) downgrades a chosen `.paste` to `.copy` when it says no; otherwise the requested paste is
   honored. The delivery inputs are snapshotted at perform time — before
   the dismissing `hide()` clears the session context — so `denyPaste` holds even for pastes that
-  dismiss the popup, and the AI card's Paste/Copy buttons are explicit requests
-  (`performCardEffect`) that carry no delivery context and are never re-decided. The live probe
+  dismiss the popup. Result cards carry the original app and input revision across asynchronous
+  work. Explicit Paste checks both again immediately before posting ⌘V. Copy remains available
+  when the selection is stale. The live probe
   (`PasteAvailabilityProbe`) needs
   Accessibility permission and
   walks the target's Edit ▸ Paste AX menu item; without AX it returns "unknown" and delivery falls
@@ -237,9 +266,9 @@ areas; stale debt notes are worse than none.
 - **Residual non-interruptible paths (documented).** Two spots remain that a hostile
   or hung target can make block a background thread:
   (1) `SelectionRetrievalCoordinator.pressEditCopyMenu` starts an AXPress on the dedicated
-  `com.openclip.ax-inspect` queue. The `pasteboardCopyTimeout` poll does not stop that press.
-  A blocked target can occupy one queue worker until AX returns or
-  `AXUIElementSetMessagingTimeout` (`Constants.axReadTimeout`) ends the call.
+  `com.openclip.ax-inspect` queue. Menu traversal uses the remaining copy deadline, and the
+  pasteboard transaction must still be active immediately before AXPress. Once issued, a blocked
+  AXPress can occupy one worker until it returns or its messaging timeout expires.
   The `inspectGate` permit is not held for that duration.
   `pressCopyMenuWithWatchdog` releases the permit at the first of {press returned, `axReadTimeout`},
   same OnceResume race as inspect. The queue is concurrent, so a blocked press does not delay
@@ -272,8 +301,9 @@ areas; stale debt notes are worse than none.
 - **Subprocess pipe reads are non-blocking (hang fix).** `ShellProcessRunner` previously read stdout/
   stderr with blocking `readToEnd()` tasks and a `Task.sleep` watchdog — both can be starved, so a
   child (or grandchild) holding a pipe open could wedge the cooperative pool and hang the test
-  suite indefinitely (observed mid-suite in `ScriptActionTests.testScriptExecution`). The runner now
-  uses a GCD timer watchdog + GCD `readabilityHandler` reads + synchronous stdin close. This claim
+  suite indefinitely when a subprocess was reading stdin. The runner now
+  uses a GCD timer watchdog + GCD `readabilityHandler` reads + synchronous stdin close. The
+  successful exit path finishes both bounded pipe drains before reading the accumulated output. This claim
   covers only the pipe reads: `process.waitUntilExit()` still blocks its detached thread until the
   child exits — bounded at `Constants.scriptTimeout`. At timeout the watchdog starts descendant
   cleanup (the child, the process group when the child is the leader, and remaining descendants).
@@ -290,20 +320,25 @@ areas; stale debt notes are worse than none.
   `retrievalMode` picks the entry point; retrieval runs that strategy and its fallbacks
   (native text controls fall back to keyboard copy unless strictly native; web areas cascade
   `ax-web-area → keyboard-copy`). Browsers resolve natively via `AXWebArea` in <1 ms with deep
-  ancestor search (depth 25 + window search) and fall back to keyboard copy with a 0.6 s timeout,
-  completely removing the legacy `browser-script` AppleScript subprocess churn and permission friction.
+  ancestor search (depth 25 + window search) and fall back to keyboard copy with a 0.6 s timeout.
+  Saved `browser-script` rules use this same path.
 - **Selection copies no longer suppress hardware input.** `SessionEventTapPoster` uses zero
   suppression interval and permits keyboard, mouse, and system events in both suppression states.
   Its synthetic events carry a source tag so selection/popup monitors do not cancel or dismiss
   their own work. Global monitors remain observation-only; the local popup monitor returns events.
 - **Clipboard capture is serialized per pasteboard.** Transactions wait cooperatively, honor
-  cancellation before copying, and restore immediately (the legacy `restoreDelay` argument is
-  compatibility-only). HID input counters invalidate capture/restoration when the user types,
+  cancellation before copying, and restore immediately. HID input counters invalidate capture
+  and restoration when the user types,
   clicks, or scrolls, preserving an intervening user copy. Rich representations must come from one
   pasteboard generation, and enrichment must match the original AX text. There is no atomic
   clipboard ownership API: unrelated background writes without input and late source-app copy
   completions after timeout remain possible; cancelled captures with intervening input deliberately
   leave the current clipboard untouched. Promised clipboard data can still block synchronously.
+- **Address-bar auto-selection is read-only.** Single mouse clicks read an explicit selection
+  only from a focused native text editor; they never run page retrieval or a copy fallback.
+  Browser native editors bypass cursor heuristics and web/rich-copy strategies. AX inspection
+  does not attach an unrelated page to the focused native editor. Cancelled copy transactions
+  leave the clipboard untouched even when an input remapper does not advance HID counters.
 - **Gesture lifetime follows the source interaction.** New mouse-down, keyboard selection, and
   ordinary key input cancel stale retrieval; dragging cancels an in-flight hold. A hold that fails
   after release retries the eligible mouse-up selection instead of swallowing it. Delivery rechecks
@@ -330,31 +365,11 @@ areas; stale debt notes are worse than none.
 
 ## Test Isolation
 
-- **Shared reset for the app singletons:** `Tests/OpenClipTests/TestIsolation.swift` centralizes
-  `TestIsolation.reset()` — clears `ActionRegistry.shared`, `ActionCustomizationManager.shared`,
-  `RuleEngine.shared`, and `ExtensionManager.shared` (loaded actions, `onRegister`/`onUnregister`
-  callbacks, and factory). The singleton-touching test classes call it in `setUp()`, so the suite is
-  order-independent. `ActionCoordinator.shared` needs no explicit reset: it mirrors the registry's
-  `@Published` state, which `ActionRegistry.reset()` clears.
-- **Tests must wire what they read.** A test that expects loaded extensions to land in the shared
-  registry must set `ExtensionManager.shared.onRegister` itself (see
-  `GoldenExtensionPlatformTests.setUp`) rather than relying on wiring left behind by an earlier
-  test class. Keep using `TestIsolation.reset()` rather than cross-class state.
-- **Store-backed behavior tests via `MemorySettingsStore`.** The shared in-memory test double
-  (`Tests/OpenClipTests/MemorySettingsStore.swift`) replaces `UserDefaults.standard` mutation in
-  `CalculateActionTests`, `ActionRegistryTests`, `GoldenExtensionPlatformTests`, and
-  `ActionCustomizationTests`. Prefer it (or `DefaultSettingsStore(userDefaults: suiteName)`) over
-  writing the real preferences domain.
-- **Isolated in-memory test doubles and seams.** Store-backed tests use `MemorySettingsStore`
-  rather than writing the real preferences domain, `SecretActionOptionStoreTests` redirects to a
-  temporary file (`SecretStore.setFileURLForTesting`), and `TextRetrieverTests` injects a stub coordinator,
-  eliminating live system pasteboard/keychain mutation during test runs.
-- **Removed slow/flaky/environment-dependent tests:** the Apple Intelligence live-model test
-  (`testAppleIntelligenceMatchesPresetPrompts`) made
-  real on-device `LanguageModelSession` calls; `DebugLogEndToEndTests` polled `OSLogStore`
-  with multi-second sleeps; and `ScriptActionTests` duplicated `ScriptActionExecutionTests` (its
-  stdin-reading test was the observed hang point). Core validation tests for those paths remain
-  (pure validation, no live model/activation).
+- `TestIsolation.reset()` clears the shared registry, customization manager, rule engine, and
+  extension manager. Tests that exercise shared extension registration supply their own callbacks.
+- Tests use memory settings, named pasteboards, temporary package directories, and temporary
+  secrets files. Selection-retrieval tests inject AX snapshots and copy captures. The popup AI
+  preset test clicks Explain in both layouts and uses a stub streaming provider.
 
 ## Logging
 
